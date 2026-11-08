@@ -44,11 +44,14 @@ case "$dest" in
 esac
 
 # Only the files the plugin actually loads; tests/ and scripts/ stay on the host.
+# COPYFILE_DISABLE stops macOS from writing "._name" AppleDouble files onto the
+# FAT volume; the find below is a belt-and-braces cleanup for older copies.
 rm -rf "$dest"
 mkdir -p "$dest"
-cp "$repo_dir"/_meta.lua "$repo_dir"/main.lua "$repo_dir"/onepage_*.lua \
+COPYFILE_DISABLE=1 cp "$repo_dir"/_meta.lua "$repo_dir"/main.lua "$repo_dir"/onepage_*.lua \
     "$repo_dir"/README.md "$dest/"
-cp -R "$repo_dir/docs" "$dest/"
+COPYFILE_DISABLE=1 cp -R "$repo_dir/docs" "$dest/"
+find "$dest" -name '._*' -delete
 
 if [[ "$fresh" == "--fresh" ]]; then
     cache="$mount/koreader/screenshots/onepage"
