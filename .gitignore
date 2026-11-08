@@ -1,0 +1,7 @@
+.DS_Store
+dist/
+tests/fixtures/
+__pycache__/
+*.pyc
+*.tmp
+*.log
