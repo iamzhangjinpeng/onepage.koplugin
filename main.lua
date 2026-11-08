@@ -204,11 +204,14 @@ local function is_valid_jpeg(path)
 end
 
 -- Changes whenever the file is replaced, so a memo about a broken JPEG does not
--- survive the re-download of a good one.
+-- survive the re-download of a good one. The mtime is floored to two seconds
+-- for the same reason as the cache key: FAT stores write time at that
+-- granularity and can report the same file a second apart.
 local function source_fingerprint(path)
     local attrs = has_lfs and lfs.attributes(path)
     if not attrs then return nil end
-    return tostring(attrs.modification) .. ":" .. tostring(attrs.size)
+    return tostring(math.floor((tonumber(attrs.modification) or 0) / 2))
+        .. ":" .. tostring(attrs.size)
 end
 
 local function is_network_available()

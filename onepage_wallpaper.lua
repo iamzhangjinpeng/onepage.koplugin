@@ -642,8 +642,14 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
         local attrs = lfs.attributes(source)
         local date = source:match("(%d%d%d%d%d%d%d%d)%.jpg$")
         if attrs and date then
+            -- Quantise the mtime to two seconds. FAT only stores write time at
+            -- that granularity, so a freshly downloaded JPEG reported e.g.
+            -- 1794139575 when read straight after the rename and 1794139574 on
+            -- the next boot. Two different keys for one unchanged file meant
+            -- every new day was re-rendered a second time for nothing.
+            local stamp = math.floor((tonumber(attrs.modification) or 0) / 2)
             local key = string.format("%s-%s-v%d-%dx%d-%d-%d.png", date, cache_style,
-                Wallpaper.CACHE_VERSION, width, height, attrs.modification, attrs.size)
+                Wallpaper.CACHE_VERSION, width, height, stamp, attrs.size)
             local target = dir .. key
             local ready = not refresh and cached_png_is_valid(target)
             local rendered
