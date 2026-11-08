@@ -84,6 +84,13 @@ sh scripts/package_release.sh      # 生成安装 zip
 
 测试用 `lupa` 的 Lua 运行时加载 `onepage_api.lua` / `onepage_layout.lua`，覆盖日期定位、字段解析、URL 归一化、两套样式的版式边界与圆角 inset，并编译检查全部 Lua 文件语法；不访问网络。
 
+真机验证按 [`docs/field-test.md`](docs/field-test.md) 走：先跑五分钟冒烟，再逐条过 16 项，故障注入与取证都在同一篇里。
+
+```sh
+scripts/deploy_usb.sh /Volumes/Kindle --fresh   # 装到 Kindle 并清空缓存
+scripts/collect_logs.sh /Volumes/Kindle         # 取回 crash.log 与渲染出的 PNG
+```
+
 ## 声明
 
 本项目仅供个人学习使用，不得用于商业用途。图文内容版权归「ONE · 一个」及原作者所有；插件只在设备本地缓存，不上传、不分发图片或文案。请遵守其用户协议与相关法律法规。
