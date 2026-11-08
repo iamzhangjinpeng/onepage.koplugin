@@ -87,6 +87,27 @@ end
 15. 旧尺寸自清理：手工塞一个 `1448x1072` 的 PNG 进 `wallpaper/`（模拟旧版本遗留的横版），再锁屏解锁，确认它被删掉、`display/wallpaper.png` 仍是 `1072x1448`。
 16. 调度归属：开一本书 → 退出到文件管理器 → 等 6 分钟，确认日志里仍有「一页壁纸: 请求今日图文」。若没有，说明关书时 `onCloseWidget` 把唯一活着的实例停掉了，需要改成「先建实例持锁、后建实例只注册菜单」并由任意实例的 `onResume` 转发给持有者（改动涉及 `init`/`onResume`/`_download_today` 的 `instance_active`，故未在离线阶段盲改）。
 
+## 离线测试
+
+`tests/test_core.py` 覆盖纯函数（排版、解析、选日、域名白名单），`tests/test_pipeline.py` 覆盖真实 I/O 路径。两个模块的外部依赖全部走 `require`，所以把 `package.loaded` 换成假的，就能在没有网络、没有 KOReader 的情况下跑通完整控制流。
+
+| 被替换的模块 | 替身做什么 |
+| --- | --- |
+| `socket.http` / `ssl.https` | 按队列吐出预置响应：状态码、`Location`、分块 body、socket 错误 |
+| `libs/libkoreader-lfs` | 桥到 Python `os`，临时目录当设备 |
+| `ffi/util` | `fsync*` 恒真 |
+| `ffi/sha2` | 走 `hashlib` |
+| `ffi/archiver` | 用一个 entry 列表代替真实 zip |
+
+覆盖到的错误分支：超时 / 连接被重置 / 非 200 / `res≠0` / 超长响应 / 同域一次重定向 / 越权重定向 / 缺 SOI-EOI / 不足 1 KB / 超上限；发布 JSON 的 draft、prerelease、改名资源、摘要格式、体积；zip 的路径穿越、绝对路径、重复条目、字节码、版本不符、条目上限、摘要不符；安装的备份占位与回滚。
+
+```
+python3 -m pip install lupa
+python3 -m unittest discover -s tests -v
+```
+
+这套用例做过变异验证：去掉重定向白名单、JPEG 首尾标记、条目上限、摘要校验、版本校验中任意一处，都会有对应用例立刻失败。`safe_path` 是唯一测不出来的——它被 `ensure_directory` 的 `mkdir` 兜住了（`..` 已存在，建不出来），属于第二层护栏。
+
 ## 已知风险
 
 - v3 接口无 SLA，失效后需要补 VOL 锚点反查或 PC HTML 兜底解析器。
@@ -95,7 +116,7 @@ end
 - JPEG 解码上限 8 MP：CDN 缩略失效时会回原图（实测 2559×1706 = 4.37 MP），阈值必须高于它，否则完全不出图；`MAX_IMAGE_EDGE = 4096` 仍限制单边。
 - `TextBoxWidget` / `ditherblitFrom` 的行为在不同 KOReader 版本可能略有差异，需实机确认。
 - 横图裁成竖屏时主体可能被切（今日照片的招牌在右侧，center-cover 实测仍完整）；后续可加焦点偏移设置。
-- 壁纸按渲染时的屏幕方向生成，两种尺寸各自缓存；屏幕旋转后要等下一次启动 / 唤醒检查才会补出对应方向的那张。同一天里，转屏 / 换样式 / 换配色各留一份 PNG（最多 8 张、约 2 MB），跨日才整批清理。
+- 壁纸**始终按竖版渲染**（`Screensaver:show()` 对图片型屏保恒定 `modeExpectsPortrait()`，会先转回竖屏再建 widget），所以只有一个 `1072x1448` 尺寸；旧版本遗留的横版文件在下次运行时按尺寸不符删掉。同一天里，换样式 / 换配色各留一份 PNG（最多 8 张、约 2 MB），跨日才整批清理。
 - 占位壁纸只在「连缓存都没有」时写一次；它绕过按日缓存，所以不会被 `prune` 当成旧图删掉，也不会被误认为当天的渲染结果。
 - 字号全部由宽度推导，这对竖屏成立、对横屏不成立（横版卡片又宽又扁）。`for_screen` 里已按各自的槽位高度给 `quote` / `category` / `day` 加了上限，新增字号时别只按宽度算，`tests/test_core.py::test_fonts_fit_their_slots_in_every_orientation` 会兜住。
 - 插件实例的调度归属依赖 KOReader 是否对插件实例调用 `onCloseWidget`，这一点离线无法确认，见真机清单第 16 条。
@@ -105,4 +126,4 @@ end
 - Lua 5.1 语法（KOReader 用 LuaJIT），不用 `goto`、`table.unpack`。
 - 代码注释用英文，用户可见文案用中文并包裹 `gettext()`。
 - 循环变量不用 `_`（是翻译函数）。
-- 新功能先补 `tests/test_core.py` 的纯逻辑用例，再动渲染代码。
+- 新功能先补测试：纯逻辑进 `tests/test_core.py`，涉及网络 / 文件 / 解压的分支进 `tests/test_pipeline.py`，再动实现代码。

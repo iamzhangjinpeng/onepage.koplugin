@@ -73,7 +73,7 @@ GET http://image.wufazhuce.com/...?imageMogr2/thumbnail/1080x/format/jpg
 - 图片域名白名单固定为 `image.wufazhuce.com`；CDN 若迁移域名，需要随版本更新。
 - 首版只做壁纸，不提供文章/问答阅读与历史任意日期回看（那是 one.koplugin 的职责）。
 - 中文渲染依赖 KOReader 内置 `cfont` 字体与 `TextBoxWidget`；字形缺失时自动缩字号、超长句省略，仍失败则退纯照片。
-- Kindle 实机显示需设备安装验证，桌面离线单测只覆盖纯逻辑。
+- 桌面离线单测不跑渲染管线（`fb` / `TextBoxWidget` / dither），排版数值可以断言，最终成像仍需实机确认。
 
 ## 开发检查
 
@@ -84,7 +84,7 @@ python3 scripts/probe.py            # 联网核对今日接口字段
 sh scripts/package_release.sh      # 生成安装 zip
 ```
 
-测试用 `lupa` 的 Lua 运行时加载 `onepage_api.lua` / `onepage_layout.lua`，覆盖日期定位、字段解析、URL 归一化、两套样式的版式边界与圆角 inset，并编译检查全部 Lua 文件语法；不访问网络。
+测试用 `lupa` 的 Lua 运行时加载插件源码，不访问网络、不需要 KOReader。`tests/test_core.py` 覆盖纯逻辑：日期定位、字段解析、URL 归一化、两套样式的版式边界与圆角 inset，外加全部 Lua 文件的语法编译检查。`tests/test_pipeline.py` 把 `socket.http` / `ssl.https` / `libs/libkoreader-lfs` / `ffi/sha2` / `ffi/archiver` 换成本地替身，跑完整请求与解包流程——重定向越权、超长响应、坏图、zip 路径穿越、摘要不符、安装回滚都在这里断言。
 
 真机验证按 [`docs/field-test.md`](docs/field-test.md) 走：先跑五分钟冒烟，再逐条过 16 项，故障注入与取证都在同一篇里。
 
