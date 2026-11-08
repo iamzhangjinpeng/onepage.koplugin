@@ -124,7 +124,7 @@ USB 的时机：Kindle 停在主页（KOReader 已退出）时插线才会挂载
 ### 14. 全新安装占位图
 
 `scripts/deploy_usb.sh /Volumes/Kindle --fresh`，飞行模式，重开 KOReader。
-**通过**：屏保是浅灰底 +「今日图文暂不可用 / 联网后会自动更新」，不是 KOReader 的启动图标；`display/wallpaper.png` 约 20 KB。关掉飞行模式、手动下载，占位图应被真实壁纸覆盖。
+**通过**：屏保是浅灰底 +「今日图文暂不可用 / 联网后会自动更新」，不是 KOReader 的启动图标；`display/wallpaper.png` 约 9–10 KB（纯色底压缩率高，别按"正常壁纸"的体积判断）；`onepage/` 下没有当天的 jpg。恢复网络后手动下载，占位图应被真实壁纸覆盖。
 
 ### 15. 旧尺寸自清理
 
