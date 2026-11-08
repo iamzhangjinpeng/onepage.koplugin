@@ -81,7 +81,10 @@ function Wallpaper.isValidPNG(path)
 end
 
 local function same_file(attrs, saved)
-    return attrs and saved and attrs.mode == saved.mode and attrs.size == saved.size
+    -- Two absent files are "the same" only for the source-less fast path below,
+    -- which checks that case explicitly before calling this.
+    if not attrs or not saved then return false end
+    return attrs.mode == saved.mode and attrs.size == saved.size
         and attrs.modification == saved.modification and attrs.change == saved.change
         and attrs.ino == saved.ino and attrs.dev == saved.dev
 end
@@ -365,7 +368,7 @@ end
 -- screensaver_show_message off (the message would be drawn over the artwork),
 -- the device would look frozen on a logo with no explanation. One flat card
 -- that says what happened is strictly better than that.
-local function render_placeholder(target, width, height, note)
+local function render_placeholder(target, width, height)
     local source, eink
     local ok, err = pcall(function()
         local Blitbuffer = require("ffi/blitbuffer")
@@ -384,7 +387,7 @@ local function render_placeholder(target, width, height, note)
         paint_text("今日图文暂不可用",
             { x = margin, y = top, w = width - 2 * margin, h = title_h },
             title_size, note_size, color(0x33), color(0xF4), "center", source, "center")
-        paint_text(note or "联网后会自动更新",
+        paint_text("联网后会自动更新",
             { x = margin, y = top + title_h + gap, w = width - 2 * margin, h = note_h },
             note_size, math.max(10, round(note_size * 0.8)), color(0x66), color(0xF4),
             "center", source, "center")
@@ -414,8 +417,9 @@ local function place_placeholder(display_dir, width, height)
     ready, err = render_placeholder(tmp, width, height)
     if ready then
         ready, err = os.rename(tmp, target)
-        if not ready then os.remove(tmp) end
     end
+    -- A half-written staging copy must never linger next to the real one.
+    if not ready then os.remove(tmp) end
     if not ready then logger.warn("一页壁纸: 无法生成占位壁纸", tostring(err)) end
     return ready, err
 end
@@ -464,7 +468,12 @@ local function prune_replaced_cache(paths, keep, date)
     for _, path in ipairs(paths) do
         if path ~= keep then
             local d, style, w, h = cache_parts(path)
-            if d and d < date then
+            if not d then
+                -- Matches the "#YYYYMMDD-*.png" scan but not the key format, so
+                -- no version of this plugin can ever select it again. Left
+                -- alone it would sit in the cache directory forever.
+                remove_wallpaper(path)
+            elseif d < date then
                 remove_wallpaper(path)
             elseif d == date and keep_style and style == keep_style
                 and w == keep_w and h == keep_h then
@@ -537,7 +546,15 @@ local function publish_wallpaper(source, dir, refreshed)
     local previous = published_png and published_png.target == target and published_png
     local display_verified = previous and same_file(attrs, previous.target_attrs)
     local source_attrs = source and lfs.attributes(source)
-    if not refreshed and display_verified and source == previous.source and same_file(source_attrs, previous.source_attrs) then
+    local source_same
+    if source then
+        source_same = previous and source == previous.source
+            and same_file(source_attrs, previous.source_attrs)
+    else
+        -- Nothing to publish: the steady state is "display copy, no source".
+        source_same = previous ~= nil and previous.source == nil
+    end
+    if not refreshed and display_verified and source_same then
         return true, nil, true
     end
 
@@ -636,6 +653,11 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
         logger.warn("一页壁纸: 壁纸生成失败", tostring(failure))
     end
     local candidate, cache_error = find_cached_wallpaper(previous, nil, cache_style, width, height)
+    if not candidate then
+        -- Switching style while offline must not fall through to a placeholder
+        -- when the other style already has a usable PNG on disk.
+        candidate = find_cached_wallpaper(previous, nil, nil, width, height)
+    end
     local available, publish_error = publish_wallpaper(candidate, display_dir)
     if not available then
         -- Nothing to show at all: no cache, no previous display copy. Put a

@@ -261,7 +261,11 @@ class TestPickToday(LuaTestCase):
 
 
 class TestLayout(LuaTestCase):
-    SCREENS = [(1072, 1448), (1080, 1080), (1448, 1072), (600, 800), (758, 1024)]
+    # Portrait, landscape, square, small, and one very wide panel: the wide
+    # one is where a width-derived quote_min can outgrow the height-capped
+    # quote and freeze text_in_box() at a size that does not fit.
+    SCREENS = [(1072, 1448), (1080, 1080), (1448, 1072), (600, 800), (758, 1024),
+               (2560, 1440)]
 
     def test_defaults(self):
         self.assertEqual(self.layout.style("banana"), "fullscreen")

@@ -113,5 +113,6 @@ GET http://image.wufazhuce.com/Fl93rM1GcYl_kdoacl-qOqTiMqMY?imageMogr2/thumbnail
 
 1. `idlist/0` → `data[1]` + 日期校验（已实现）
 2. 遍历 idlist 前 10 个找日期匹配（已实现）
-3. 本地 7 天内可用壁纸（已实现：失败时保留 `display/wallpaper.png`）
-4. VOL 锚点反查 / PC HTML 抓站（未实现，留待 v3 接口失效时补）
+3. 本地缓存（已实现）：先找「当前样式/配色 + 当前屏幕尺寸」的最新渲染 PNG，再放宽到任意样式、任意尺寸，最后才用 `display/wallpaper.png`。缓存没有天数上限，只按「同一天同尺寸被新渲染取代」与「跨日」清理。
+4. 连缓存都没有（全新安装、第一次就失败）：写入「今日图文暂不可用 / 联网后会自动更新」的占位图，避免屏保回退到 KOReader 自带图标（已实现）。
+5. VOL 锚点反查 / PC HTML 抓站（未实现，留待 v3 接口失效时补）

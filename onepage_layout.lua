@@ -92,11 +92,17 @@ function Layout.for_screen(width, height, style, contrast)
     -- would not fit its 86px slot and TextBoxWidget would spill it into the
     -- month line. Cap each size by the height it actually has to live in.
     -- Portrait layouts are unaffected: the caps only bind in landscape.
-    local quote = round(unit * (style == "card" and 0.039 or 0.033))
-    local quote_min = math.max(10, round(unit * 0.024))
+    local quote = math.max(11, math.min(round(unit * (style == "card" and 0.039 or 0.033)),
+        math.floor(box.info.h * 0.17)))
+    -- quote_min must never exceed the size the quote can actually be painted
+    -- at, otherwise text_in_box() stops shrinking immediately (`current <=
+    -- min_size`) and a long quote overflows with an ellipsis. On a 2560x1440
+    -- landscape screen the width-derived minimum (61) used to beat the
+    -- height-capped quote (55).
+    local quote_min = math.max(10, math.min(round(unit * 0.024), quote))
     result.fonts = {
-        quote = math.max(11, math.min(quote, math.floor(box.info.h * 0.17))),
-        quote_min = math.min(quote_min, math.max(11, quote)),
+        quote = quote,
+        quote_min = quote_min,
         category = math.max(10, math.min(round(unit * 0.022), math.floor(box.cat.h * 0.7))),
         vol = math.max(10, round(unit * 0.022)),
         month = math.max(10, round(unit * 0.022)),
