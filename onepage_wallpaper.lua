@@ -494,7 +494,7 @@ end
 -- always composed into the portrait rectangle, so a PNG rendered at any other
 -- size can never be shown undistorted again. Left on disk it would still be
 -- picked as a fallback and published squashed, so it is deleted instead.
-local function find_cached_wallpaper(paths, newer_than, cache_style, width, height)
+local function find_cached_wallpaper(paths, cache_style, width, height)
     table.sort(paths, function(a, b)
         local left, right = cache_key(a), cache_key(b)
         if left ~= right then return left > right end
@@ -502,9 +502,8 @@ local function find_cached_wallpaper(paths, newer_than, cache_style, width, heig
     end)
     local failure
     for _, path in ipairs(paths) do
-        local d, style, w, h = cache_parts(path)
-        local usable = d and (not newer_than or d > newer_than)
-            and (not cache_style or (style and style:sub(1, #cache_style) == cache_style))
+        local _, style, w, h = cache_parts(path)
+        local usable = style and (not cache_style or style:sub(1, #cache_style) == cache_style)
         if usable then
             local valid = cached_png_is_valid(path)
             if valid then
@@ -665,10 +664,13 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
                 end
             end
             if ready then
-                local candidate = find_cached_wallpaper(previous, date, cache_style, width, height)
-                    or target
-                local available, publish_error, published = publish_wallpaper(candidate, display_dir,
-                    rendered and candidate == target)
+                -- `ready` means `target` exists and passed the PNG check, so
+                -- there is nothing to look up: publish exactly what was just
+                -- verified. The old find_cached_wallpaper(previous, date, ...)
+                -- here could never match (it required d > date, and every
+                -- candidate was dated today), so it always fell through to
+                -- `or target` anyway.
+                local available, publish_error, published = publish_wallpaper(target, display_dir, rendered)
                 if rendered and published then prune_replaced_cache(previous, target, date) end
                 -- Renders are rare (the key carries the size, the style, the
                 -- contrast and the source fingerprint), and without this line a
@@ -682,11 +684,11 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
         failure = failure or "Cannot prepare the wallpaper"
         logger.warn("一页壁纸: 壁纸生成失败", tostring(failure))
     end
-    local candidate, cache_error = find_cached_wallpaper(previous, nil, cache_style, width, height)
+    local candidate, cache_error = find_cached_wallpaper(previous, cache_style, width, height)
     if not candidate then
         -- Switching style while offline must not fall through to a placeholder
         -- when the other style already has a usable PNG on disk.
-        candidate = find_cached_wallpaper(previous, nil, nil, width, height)
+        candidate = find_cached_wallpaper(previous, nil, width, height)
     end
     local available, publish_error = publish_wallpaper(candidate, display_dir)
     if not available then

@@ -289,6 +289,18 @@ local function wallpaper_contrast()
     return "high"
 end
 
+-- The menu labels carry their own parenthetical ("高对比白（默认）"), which is
+-- right in a list and wrong in a "已切换到：…" toast.
+local function label_of(list, value)
+    for _, item in ipairs(list) do
+        if item[1] == value then return (item[2]:gsub("（[^（）]*）$", "")) end
+    end
+    return value
+end
+
+local function style_label(style) return label_of(WALLPAPER_STYLES, style) end
+local function contrast_label(value) return label_of(CONTRAST_STYLES, value) end
+
 local function set_auto_screensaver_enabled(enabled)
     if G_reader_settings then
         G_reader_settings:saveSetting(SETTING_AUTO_SCREENSAVER, enabled)
@@ -302,7 +314,7 @@ end
 
 local function status_text(status)
     if status == "ok" then return gettext("一页壁纸已更新")
-    elseif status == "exists" then return gettext("今日一页壁纸已存在")
+    elseif status == "exists" then return gettext("今日壁纸已是最新，无需重新下载")
     elseif status == "no_network" then return gettext("无网络连接")
     elseif status == "open_error" then return gettext("无法创建文件（权限或空间不足）")
     elseif status == "network_error" then return gettext("网络请求失败")
@@ -728,13 +740,17 @@ function OnePage:_select_wallpaper_style(style)
     G_reader_settings:saveSetting(SETTING_WALLPAPER_STYLE, style)
     G_reader_settings:flush()
     local available, failure = self:_refresh_wallpaper()
+    -- Say something on success too: tapping a style used to give no feedback at
+    -- all when it worked, which reads exactly like the tap being ignored.
     local message
     if failure then
         message = gettext("壁纸生成失败，稍后会用缓存重试")
     elseif not available then
         message = gettext("已保存壁纸类型，下载图片后生效")
+    else
+        message = gettext("已切换到：") .. style_label(style)
     end
-    if message then UIManager:show(InfoMessage:new{ text = message, timeout = 3 }) end
+    UIManager:show(InfoMessage:new{ text = message, timeout = 2 })
 end
 
 function OnePage:_select_contrast(value)
@@ -742,7 +758,16 @@ function OnePage:_select_contrast(value)
     if wallpaper_contrast() == value then return end
     G_reader_settings:saveSetting(SETTING_CONTRAST, value)
     G_reader_settings:flush()
-    self:_refresh_wallpaper(nil, true)
+    local available, failure = self:_refresh_wallpaper(nil, true)
+    local message
+    if failure then
+        message = gettext("壁纸生成失败，稍后会用缓存重试")
+    elseif not available then
+        message = gettext("已保存配色，下载图片后生效")
+    else
+        message = gettext("已切换到：") .. contrast_label(value)
+    end
+    UIManager:show(InfoMessage:new{ text = message, timeout = 2 })
 end
 
 -- 自动配置屏保；首次配置前保存原值，关闭开关时恢复
@@ -1035,7 +1060,7 @@ function OnePage:_run(opts)
         cleanup_old_images(today_str)
         if opts and opts.notify then
             UIManager:show(InfoMessage:new{
-                text = wallpaper_error and gettext("今日图片已保存，壁纸生成失败") or gettext("今日一页壁纸已存在"),
+                text = wallpaper_error and gettext("今日图片已保存，壁纸生成失败") or gettext("今日壁纸已是最新，无需重新下载"),
                 timeout = 2,
             })
         end
@@ -1243,6 +1268,15 @@ function OnePage:_diagnostics()
     lines[#lines + 1] = gettext("壁纸: ")
         .. (wallpaper_style() == "card" and gettext("白底圆角卡") or gettext("全屏"))
         .. " / " .. (wallpaper_contrast() == "high" and gettext("高对比白") or gettext("经典灰"))
+    -- The screensaver copies this file verbatim, so its size is the quickest
+    -- way to tell a real render (100 KB+) from the placeholder (~9 KB) from a
+    -- distance, without decoding anything on the device.
+    local display_attrs = lfs.attributes(WALLPAPER_DISPLAY_DIR .. "wallpaper.png")
+    if display_attrs and display_attrs.mode == "file" then
+        lines[#lines + 1] = gettext("屏保图: ") .. tostring(math.floor(display_attrs.size / 1024)) .. " KB"
+    else
+        lines[#lines + 1] = gettext("屏保图: 缺失")
+    end
     lines[#lines + 1] = gettext("今日文案: ")
         .. (file_exists(SAVE_DIR .. today_str .. ".json") and gettext("已缓存") or gettext("未缓存"))
     return table.concat(lines, "\n")
