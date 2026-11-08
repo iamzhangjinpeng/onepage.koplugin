@@ -1204,10 +1204,14 @@ function OnePage:_install_plugin_update(Update, paths, release)
             Update.remove_stage(paths, stage)
             if not current then return end
             if status == "installed" then
+                -- The updater is silent on success, so without this line a
+                -- crash.log cannot tell an upgrade from a plain restart.
+                logger.info("一页壁纸: 插件已更新到", release.version)
                 show_update_restart(gettext("一页壁纸已安装 ") .. release.version .. gettext("，重启 KOReader 后生效。"))
             elseif update_needs_restart then
                 show_update_restart()
             else
+                logger.warn("一页壁纸: 插件更新失败", tostring(status))
                 update_message(gettext("安装失败：") .. update_error(status))
             end
         end)
@@ -1247,6 +1251,7 @@ function OnePage:_check_plugin_update()
             if not current then return end
             local release = Update.parse_result(status)
             if release then
+                logger.info("一页壁纸: 发现新版本", release.version, "当前", self.version)
                 local text = gettext("发现一页壁纸新版本 ") .. release.version
                     .. "\n" .. gettext("当前版本 ") .. self.version
                 if release.notes ~= "" then text = text .. "\n\n" .. release.notes end
@@ -1264,6 +1269,7 @@ function OnePage:_check_plugin_update()
             elseif status == "current" then
                 update_message(gettext("一页壁纸已是最新版 ") .. self.version)
             else
+                logger.warn("一页壁纸: 检查更新失败", tostring(status))
                 update_message(gettext("检查更新失败：") .. update_error(status))
             end
         end)
