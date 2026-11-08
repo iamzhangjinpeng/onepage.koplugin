@@ -1,10 +1,12 @@
 --[[
 onepage wallpaper renderer.
 
-Two styles, one content painter:
+Three styles, one content painter:
   fullscreen — the ONE app card fills the screen (photo / category / quote / date)
   card       — the same card sits inside a white rounded card on a light canvas,
                with ONE branding above and VOL/date/credit below
+  poster     — the same card, but the photo and the text panels bleed to the
+               card's edge: the radius is cut out of the photo, not a white lip
 
 Text layout follows yiyan.koplugin: TextBoxWidget with progressive font shrink,
 painted into an off-screen BlitBuffer. Rounded corners follow

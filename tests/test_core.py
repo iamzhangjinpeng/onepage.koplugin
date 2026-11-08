@@ -270,13 +270,14 @@ class TestLayout(LuaTestCase):
     def test_defaults(self):
         self.assertEqual(self.layout.style("banana"), "fullscreen")
         self.assertEqual(self.layout.style("card"), "card")
+        self.assertEqual(self.layout.style("poster"), "poster")
         self.assertEqual(self.layout.contrast(None), "high")
         self.assertEqual(self.layout.month_name(11), "Nov")
         self.assertEqual(self.layout.month_name(1), "Jan")
 
     def test_layouts_are_valid_for_all_screens_styles_palettes(self):
         for width, height in self.SCREENS:
-            for style in ["fullscreen", "card"]:
+            for style in ["fullscreen", "card", "poster"]:
                 for contrast in ["high", "classic"]:
                     with self.subTest(size=(width, height), style=style, contrast=contrast):
                         L = self.layout.for_screen(width, height, style, contrast)
@@ -294,7 +295,7 @@ class TestLayout(LuaTestCase):
         45% of the date column and the category band is only ~5% of the card.
         """
         for width, height in self.SCREENS:
-            for style in ["fullscreen", "card"]:
+            for style in ["fullscreen", "card", "poster"]:
                 with self.subTest(size=(width, height), style=style):
                     L = self.layout.for_screen(width, height, style, "high")
                     c = L["content"]
@@ -323,6 +324,21 @@ class TestLayout(LuaTestCase):
         L = self.layout.for_screen(1072, 1448, "fullscreen", "classic")
         self.assertIsNone(L["card"])
         self.assertEqual(L["colors"]["info"], 0xD9)
+
+    def test_poster_is_the_framed_card_without_its_lip(self):
+        """Same card rect, same radius — only the inner padding disappears."""
+        framed = self.layout.for_screen(1072, 1448, "card", "high")
+        bleed = self.layout.for_screen(1072, 1448, "poster", "high")
+        for key in ("x", "y", "w", "h", "radius"):
+            self.assertEqual(framed["card"][key], bleed["card"][key])
+        c, box = bleed["card"], bleed["content"]
+        self.assertEqual((box["x"], box["y"], box["w"], box["h"]),
+                         (c["x"], c["y"], c["w"], c["h"]))
+        self.assertEqual(framed["content"]["x"] - framed["card"]["x"], 34)
+        self.assertGreater(bleed["content"]["photo"]["w"], framed["content"]["photo"]["w"])
+        self.assertGreater(bleed["fonts"]["quote"], framed["fonts"]["quote"])
+        self.assertFalse(self.layout.is_card("fullscreen"))
+        self.assertTrue(self.layout.is_card("poster"))
 
     def test_footer_text_omits_missing_vol_and_author(self):
         """Degraded metadata is {date=...}; it used to render the literal 'VOL.nil'."""

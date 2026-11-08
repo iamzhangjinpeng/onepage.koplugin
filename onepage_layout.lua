@@ -1,5 +1,5 @@
 --[[
-onepage layout — pure geometry and typography for both wallpaper styles.
+onepage layout — pure geometry and typography for every wallpaper style.
 
 No KOReader modules are required here, so the whole file can be unit tested in
 a stock Lua 5.1 runtime. All measurements are physical pixels; every value is
@@ -10,11 +10,22 @@ local Layout = { VERSION = 1, DEFAULT_STYLE = "fullscreen", DEFAULT_CONTRAST = "
 
 local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
 
+-- "card" keeps the white lip inside the rounded card, exactly like the ONE
+-- app screenshot it was copied from. "poster" is the same card with that lip
+-- removed: content bleeds to the edge and the corner radius is cut out of the
+-- photo instead of out of a white frame.
+local STYLES = { fullscreen = true, card = true, poster = true }
+
 local function round(v) return math.floor(v + 0.5) end
 Layout.round = round
 
 function Layout.style(value)
-    return (value == "card" and "card") or "fullscreen"
+    return STYLES[value] and value or "fullscreen"
+end
+
+-- Both card-style variants share one frame; only the inner lip differs.
+function Layout.is_card(style)
+    return style == "card" or style == "poster"
 end
 
 function Layout.contrast(value)
@@ -71,28 +82,36 @@ function Layout.for_screen(width, height, style, contrast)
         local card_y = round(height * 0.115)
         local card_h = round(height * 0.740)
         local radius = round(math.min(width, height) * 0.045)
-        local pad = round(width * 0.032)
         result.card = {
             x = margin_x, y = card_y,
             w = width - 2 * margin_x, h = card_h,
-            radius = radius, pad = pad,
+            radius = radius,
         }
         local c = result.card
-        result.content = content_boxes(c.x + pad, c.y + pad, c.w - 2 * pad, c.h - 2 * pad, true)
+        if style == "poster" then
+            -- Content bleeds to the card's edges. The card is cut out row by
+            -- row with an arc-derived inset, so a photo that touches the
+            -- border ends up rounded with it — no white margin needed.
+            result.content = content_boxes(c.x, c.y, c.w, c.h, true)
+        else
+            local pad = round(width * 0.032)
+            result.content = content_boxes(c.x + pad, c.y + pad, c.w - 2 * pad, c.h - 2 * pad, true)
+        end
         result.header = { x = c.x, y = round(card_y * 0.42), w = c.w, h = round(card_y * 0.38) }
         local below = height - (c.y + c.h)
         result.footer = { x = c.x, y = c.y + c.h + round(below * 0.30), w = c.w, h = round(below * 0.42) }
     end
 
     local box = result.content
-    local unit = style == "card" and box.w or width
+    local is_card = Layout.is_card(style)
+    local unit = is_card and box.w or width
     -- Every size below is derived from the width, which assumes a portrait
     -- screen. A landscape card is wide but short: on a 1448x1072 screen the
     -- content box is 1162x701, so a 107px day numeral (from a 1162px width)
     -- would not fit its 86px slot and TextBoxWidget would spill it into the
     -- month line. Cap each size by the height it actually has to live in.
     -- Portrait layouts are unaffected: the caps only bind in landscape.
-    local quote = math.max(11, math.min(round(unit * (style == "card" and 0.039 or 0.033)),
+    local quote = math.max(11, math.min(round(unit * (is_card and 0.039 or 0.033)),
         math.floor(box.info.h * 0.17)))
     -- quote_min must never exceed the size the quote can actually be painted
     -- at, otherwise text_in_box() stops shrinking immediately (`current <=

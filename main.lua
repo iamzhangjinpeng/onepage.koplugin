@@ -2,7 +2,7 @@
 一页壁纸 (OnePage) — KOReader 插件
 - 每日从 ONE · 一个 v3 接口取当日图文（照片 + 一句话 + 期号 + 日期），
   在设备本地合成灰阶壁纸，并自动接管 KOReader 锁屏屏保。
-- 支持「全屏」与「白底圆角卡」两种壁纸，均可离线重绘。
+- 支持「全屏」「白底圆角卡」「满版圆角卡」三种壁纸，均可离线重绘。
 - 下载在后台子进程执行，网络等待期间不阻塞 KOReader 界面。
 - 安装即自动配置屏保（随机图模式 + 专用目录 + 拉伸填充，避免两侧黑边）。
 - 唤醒后自动更新；Wi-Fi 重连期间退避重试，连上立即下载。
@@ -90,6 +90,7 @@ local SETTING_CONTRAST = "onepage_contrast"
 local WALLPAPER_STYLES = {
     { "fullscreen", gettext("全屏") },
     { "card", gettext("白底圆角卡") },
+    { "poster", gettext("满版圆角卡") },
 }
 local CONTRAST_STYLES = {
     { "high", gettext("高对比白（默认）") },
@@ -295,14 +296,15 @@ local function is_auto_screensaver_enabled()
 end
 
 local function wallpaper_style()
-    if G_reader_settings and G_reader_settings:readSetting(SETTING_WALLPAPER_STYLE) == "card" then
-        return "card"
+    local saved = G_reader_settings and G_reader_settings:readSetting(SETTING_WALLPAPER_STYLE)
+    for _, item in ipairs(WALLPAPER_STYLES) do
+        if item[1] == saved then return saved end
     end
     return "fullscreen"
 end
 
--- Palette is a sub-option, not a third style: the user only chooses between
--- fullscreen and card, and either one can be rendered in high contrast.
+-- Palette is a sub-option, not a style of its own: every style — fullscreen,
+-- the framed card and the bleed card — can be rendered in either palette.
 local function wallpaper_contrast()
     if G_reader_settings and G_reader_settings:readSetting(SETTING_CONTRAST) == "classic" then
         return "classic"
@@ -1311,7 +1313,7 @@ function OnePage:_diagnostics()
     end
     lines[#lines + 1] = gettext("自动配置: ") .. (is_auto_screensaver_enabled() and gettext("开") or gettext("关"))
     lines[#lines + 1] = gettext("壁纸: ")
-        .. (wallpaper_style() == "card" and gettext("白底圆角卡") or gettext("全屏"))
+        .. style_label(wallpaper_style())
         .. " / " .. (wallpaper_contrast() == "high" and gettext("高对比白") or gettext("经典灰"))
     -- The screensaver copies this file verbatim, so its size is the quickest
     -- way to tell a real render (100 KB+) from the placeholder (~9 KB) from a
