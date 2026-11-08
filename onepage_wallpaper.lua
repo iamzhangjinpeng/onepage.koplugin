@@ -198,10 +198,24 @@ end
 -- Paint and release immediately: a 1072x1448 wallpaper holds seven of these,
 -- and keeping every widget's pixel buffer alive until the end of render() was
 -- several megabytes of avoidable peak memory.
-local function paint_text(text, box, size, min_size, fgcolor, bgcolor, alignment, bb)
+--
+-- TextBoxWidget always paints from the top of its box: `height_adjust` only
+-- shrinks the widget to its line count, it never centres the block. Painting
+-- at box.y therefore pushed every short text to the top of its slot -- the
+-- fullscreen quote sat on the photo edge with ~200 empty pixels beneath it,
+-- and the day numeral hugged the top of its column. valign="center" measures
+-- the shrunken widget and offsets it, which is what the ONE card looks like.
+local function paint_text(text, box, size, min_size, fgcolor, bgcolor, alignment, bb, valign)
     if not text or text == "" then return end
     local widget = text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignment)
-    local painted = pcall(widget.paintTo, widget, bb, box.x, box.y)
+    local y = box.y
+    if valign == "center" then
+        local measured, height = pcall(function() return widget:getSize().h end)
+        if measured and type(height) == "number" and height < box.h then
+            y = box.y + math.floor((box.h - height) / 2)
+        end
+    end
+    local painted = pcall(widget.paintTo, widget, bb, box.x, y)
     widget:free()
     if not painted then error("Cannot paint text") end
 end
@@ -236,7 +250,7 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     panel:paintRect(cat.x - ox, cat.y - oy, cat.w, cat.h, color(colors.cat))
     paint_text((meta and meta.category) or "摄影", local_box(cat),
         L.fonts.category, L.fonts.category, color(colors.cat_text), color(colors.cat),
-        "center", panel)
+        "center", panel, "center")
 
     -- Quote panel and date column.
     local info, date = C.info, C.date
@@ -250,7 +264,7 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     if meta and type(meta.quote) == "string" then
         paint_text(meta.quote, local_box(info, pad, pad, -2 * pad, -2 * pad),
             L.fonts.quote, L.fonts.quote_min, color(colors.text), color(colors.info),
-            "left", panel)
+            "left", panel, "center")
     end
 
     local date_str = tostring((meta and meta.date) or "")
@@ -265,9 +279,9 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     day_box.h = round(date.h * 0.45)
     local month_box = local_box(date, dpad, round(date.h * 0.78), -2 * dpad, 0)
     month_box.h = round(date.h * 0.18)
-    paint_text(vol_text, vol_box, L.fonts.vol, L.fonts.vol, date_color, date_bg, "center", panel)
-    paint_text(day_text, day_box, L.fonts.day, round(L.fonts.day * 0.7), date_color, date_bg, "center", panel)
-    paint_text(month_text, month_box, L.fonts.month, L.fonts.month, date_color, date_bg, "center", panel)
+    paint_text(vol_text, vol_box, L.fonts.vol, L.fonts.vol, date_color, date_bg, "center", panel, "center")
+    paint_text(day_text, day_box, L.fonts.day, round(L.fonts.day * 0.7), date_color, date_bg, "center", panel, "center")
+    paint_text(month_text, month_box, L.fonts.month, L.fonts.month, date_color, date_bg, "center", panel, "center")
 end
 
 local function render(source, target, width, height, style, contrast)
@@ -311,9 +325,9 @@ local function render(source, target, width, height, style, contrast)
                 end
             end
             paint_text("ONE · 一个", L.header, L.fonts.header, L.fonts.header,
-                color(colors.text), color(colors.canvas), "center", canvas)
+                color(colors.text), color(colors.canvas), "center", canvas, "center")
             paint_text(Layout.footer_text(meta), L.footer, L.fonts.footer, L.fonts.footer,
-                color(colors.text), color(colors.canvas), "center", canvas)
+                color(colors.text), color(colors.canvas), "center", canvas, "center")
         else
             canvas = panel
             panel = nil
@@ -346,6 +360,66 @@ local function render(source, target, width, height, style, contrast)
     return true, nil, invalid_source
 end
 
+-- A fresh install that has never rendered anything would otherwise show
+-- KOReader's stock resources/koreader.png -- and because this plugin turns
+-- screensaver_show_message off (the message would be drawn over the artwork),
+-- the device would look frozen on a logo with no explanation. One flat card
+-- that says what happened is strictly better than that.
+local function render_placeholder(target, width, height, note)
+    local source, eink
+    local ok, err = pcall(function()
+        local Blitbuffer = require("ffi/blitbuffer")
+        local function color(v) return Blitbuffer.Color8(v) end
+        source = Blitbuffer.new(width, height, Blitbuffer.TYPE_BB8)
+        source:paintRect(0, 0, width, height, color(0xF4))
+        local margin = round(width * 0.08)
+        local title_size = math.max(18, round(width * 0.040))
+        local note_size = math.max(12, round(width * 0.020))
+        -- Two stacked single-line boxes, each tall enough for one line at its
+        -- own size (cfont line height is ~1.35x), centred together on the page.
+        local title_h = round(title_size * 1.5)
+        local note_h = round(note_size * 1.5)
+        local gap = round(note_size * 0.8)
+        local top = round((height - title_h - gap - note_h) / 2)
+        paint_text("今日图文暂不可用",
+            { x = margin, y = top, w = width - 2 * margin, h = title_h },
+            title_size, note_size, color(0x33), color(0xF4), "center", source, "center")
+        paint_text(note or "联网后会自动更新",
+            { x = margin, y = top + title_h + gap, w = width - 2 * margin, h = note_h },
+            note_size, math.max(10, round(note_size * 0.8)), color(0x66), color(0xF4),
+            "center", source, "center")
+        eink = Blitbuffer.new(width, height, Blitbuffer.TYPE_BB8)
+        eink:ditherblitFrom(source, 0, 0, 0, 0, width, height)
+        local written, detail = eink:writeToFile(target, "png")
+        if written == false then
+            error(type(detail) == "string" and detail or "Cannot write the placeholder", 0)
+        end
+        assert(valid_png(target, lfs.attributes(target)), "Incomplete placeholder PNG")
+    end)
+    if source then source:free() end
+    if eink then eink:free() end
+    if not ok then return false, tostring(err) end
+    return true
+end
+
+-- Write the placeholder straight to display/wallpaper.png. It deliberately
+-- bypasses the dated cache: it must never be mistaken for a real day's render,
+-- and the next successful prepare() overwrites it anyway.
+local function place_placeholder(display_dir, width, height)
+    if lfs.attributes(display_dir .. "wallpaper.png", "mode") == "file" then return true end
+    local ready, err = util.makePath(display_dir)
+    if not ready then return false, err end
+    local target = display_dir .. "wallpaper.png"
+    local tmp = target .. ".tmp"
+    ready, err = render_placeholder(tmp, width, height)
+    if ready then
+        ready, err = os.rename(tmp, target)
+        if not ready then os.remove(tmp) end
+    end
+    if not ready then logger.warn("一页壁纸: 无法生成占位壁纸", tostring(err)) end
+    return ready, err
+end
+
 -- ---------------------------------------------------------------------------
 -- Cache and publish (from danxiangli.koplugin)
 -- ---------------------------------------------------------------------------
@@ -354,8 +428,13 @@ local function cache_key(path)
     return path:match("^(.*%.png)%.pending%d*$") or path
 end
 
-local function cache_date(path)
-    return path:match("(%d%d%d%d%d%d%d%d)%-[^/]+$")
+-- "<date>-<style>-v<schema>-<w>x<h>-<mtime>-<size>.png". The style half is
+-- itself hyphenated ("fullscreen-high"), so the lazy `.-` has to stop at the
+-- "-v<number>-" marker rather than at the first hyphen.
+local function cache_parts(path)
+    local date, style, w, h = cache_key(path):match(
+        "(%d%d%d%d%d%d%d%d)%-(.-)%-v%d+%-(%d+)x(%d+)%-%d+%-%d+%.png$")
+    return date, style, tonumber(w), tonumber(h)
 end
 
 local function generated_images(dir)
@@ -375,33 +454,53 @@ local function remove_wallpaper(path)
     if not removed then logger.warn("一页壁纸: 无法清理壁纸", path, tostring(err)) end
 end
 
+-- Deleting every PNG of the same day used to throw away the other style, the
+-- other contrast and the other orientation. Rotating the device then had to
+-- re-render from scratch on the next wake (1-2 s of the screen being wrong),
+-- and rotating back did it again. Only supersede the exact same
+-- date+style+contrast+size, and drop whole days once they are gone.
 local function prune_replaced_cache(paths, keep, date)
+    local keep_style, keep_w, keep_h = select(2, cache_parts(keep))
     for _, path in ipairs(paths) do
-        if path ~= keep and cache_date(path) <= date then remove_wallpaper(path) end
+        if path ~= keep then
+            local d, style, w, h = cache_parts(path)
+            if d and d < date then
+                remove_wallpaper(path)
+            elseif d == date and keep_style and style == keep_style
+                and w == keep_w and h == keep_h then
+                remove_wallpaper(path)
+            end
+        end
     end
 end
 
-local function find_cached_wallpaper(paths, newer_than, cache_style)
+-- Newest first. `width`/`height` are a preference, not a filter: a wallpaper
+-- rendered for the previous orientation is still better than none, so a
+-- dimension mismatch is remembered as a fallback instead of being skipped.
+local function find_cached_wallpaper(paths, newer_than, cache_style, width, height)
     table.sort(paths, function(a, b)
         local left, right = cache_key(a), cache_key(b)
         if left ~= right then return left > right end
         return a < b
     end)
-    local failure
+    local fallback, failure
     for _, path in ipairs(paths) do
-        local d, rest = cache_key(path):match("(%d%d%d%d%d%d%d%d)%-(.+)%.png$")
-        local matches = rest and cache_style and rest:sub(1, #cache_style) == cache_style
-        if not newer_than or (d and d > newer_than and matches) then
+        local d, style, w, h = cache_parts(path)
+        local usable = d and (not newer_than or d > newer_than)
+            and (not cache_style or (style and style:sub(1, #cache_style) == cache_style))
+        if usable then
             local valid = cached_png_is_valid(path)
-            if valid then return path end
-            if valid == false then
+            if valid then
+                if not width or (w == width and h == height) then return path end
+                fallback = fallback or path
+            elseif valid == false then
                 remove_wallpaper(path)
             else
                 failure = "Cannot verify the cached wallpaper"
             end
         end
     end
-    return nil, failure
+    return fallback, failure
 end
 
 local function copy_png(source, target, size)
@@ -491,18 +590,18 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
     local previous = generated_images(dir)
     local tmp = dir .. "wallpaper.png.tmp"
     os.remove(tmp)
+    -- Render for the orientation the device is in right now. Forcing min/max
+    -- (always portrait) meant a landscape screen had to stretch a portrait PNG,
+    -- and KOReader's screensaver stretch is enabled by this plugin, so the
+    -- result was a squashed wallpaper. The cache key carries the dimensions,
+    -- so both variants can coexist.
+    local screen = require("device").screen
+    local width, height = screen:getWidth(), screen:getHeight()
     local failure, invalid_source
     if source then
         local attrs = lfs.attributes(source)
         local date = source:match("(%d%d%d%d%d%d%d%d)%.jpg$")
         if attrs and date then
-            local screen = require("device").screen
-            -- Render for the orientation the device is in right now. Forcing
-            -- min/max (always portrait) meant a landscape screen had to stretch
-            -- a portrait PNG, and KOReader's screensaver stretch is enabled by
-            -- this plugin, so the result was a squashed wallpaper. The cache
-            -- key already carries the dimensions, so both variants can coexist.
-            local width, height = screen:getWidth(), screen:getHeight()
             local key = string.format("%s-%s-v%d-%dx%d-%d-%d.png", date, cache_style,
                 Wallpaper.CACHE_VERSION, width, height, attrs.modification, attrs.size)
             local target = dir .. key
@@ -525,7 +624,8 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
                 end
             end
             if ready then
-                local candidate = find_cached_wallpaper(previous, date, cache_style) or target
+                local candidate = find_cached_wallpaper(previous, date, cache_style, width, height)
+                    or target
                 local available, publish_error, published = publish_wallpaper(candidate, display_dir,
                     rendered and candidate == target)
                 if rendered and published then prune_replaced_cache(previous, target, date) end
@@ -535,8 +635,14 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
         failure = failure or "Cannot prepare the wallpaper"
         logger.warn("一页壁纸: 壁纸生成失败", tostring(failure))
     end
-    local candidate, cache_error = find_cached_wallpaper(previous)
+    local candidate, cache_error = find_cached_wallpaper(previous, nil, cache_style, width, height)
     local available, publish_error = publish_wallpaper(candidate, display_dir)
+    if not available then
+        -- Nothing to show at all: no cache, no previous display copy. Put a
+        -- readable card on the screen instead of KOReader's stock logo. The
+        -- failure is still returned, so the status line stays truthful.
+        place_placeholder(display_dir, width, height)
+    end
     return available, failure or publish_error or cache_error, invalid_source
 end
 
