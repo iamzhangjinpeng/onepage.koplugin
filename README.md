@@ -36,7 +36,7 @@
 
 ## 数据与缓存
 
-每天 3 次请求（图文 id 列表 → 图文详情 → 图片）：
+正常路径 3 次请求（图文 id 列表 → 图文详情 → 图片）；如果 `data[1]` 不是今天，会按日期顺序最多再探测 9 次详情，最坏 12 次。整条链路共享 60 秒预算：
 
 ```text
 GET http://v3.wufazhuce.com:8000/api/hp/idlist/0?version=3.5.0&platform=android

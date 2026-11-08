@@ -24,7 +24,12 @@ local Layout = dofile((debug.getinfo(1, "S").source:match("^@(.*/)") or "./")
     .. "onepage_layout.lua")
 
 local Wallpaper = { MAX_JPEG_BYTES = 4 * 1024 * 1024, CACHE_VERSION = 1 }
-local MAX_JPEG_PIXELS = 4 * 1024 * 1024
+-- The 1080px thumbnail is ~0.78 MP, but the CDN sometimes ignores the
+-- imageMogr2 parameters and returns the original 2559x1706 (4.37 MP).
+-- Rejecting that would mean "never renders a wallpaper again", so the pixel
+-- cap must sit above the unthumbnailed original. The 4096px edge limit below
+-- still bounds the decode.
+local MAX_JPEG_PIXELS = 8 * 1024 * 1024
 local MAX_PNG_BYTES = 32 * 1024 * 1024
 local MAX_PNG_PIXELS = 8 * 1024 * 1024
 local MAX_IMAGE_EDGE = 4096

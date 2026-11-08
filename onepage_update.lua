@@ -147,7 +147,9 @@ end
 
 local function short_notes(body)
     if type(body) ~= "string" then return "" end
-    body = body:gsub("[%z\1-\8\11\12\14-\31\127]", "")
+    -- Keep \n and \t; drop everything else including \r, which would otherwise
+    -- show up as extra blank lines in the ConfirmBox.
+    body = body:gsub("[%z\1-\8\11-\31\127]", "")
     local limit = 480
     if #body <= limit then return body end
     while limit > 0 and body:byte(limit + 1) >= 128 and body:byte(limit + 1) <= 191 do

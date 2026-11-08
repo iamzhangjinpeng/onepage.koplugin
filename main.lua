@@ -279,6 +279,7 @@ local function status_text(status)
     elseif status == "rename_error" then return gettext("文件替换失败")
     elseif status == "write_error" then return gettext("元数据写入失败")
     elseif status == "no_today" then return gettext("今日内容尚未发布")
+    elseif status == "bad_detail" then return gettext("接口返回内容不完整，稍后重试")
     elseif status == "decode" or status == "nojson" then return gettext("接口返回无法解析")
     elseif type(status) == "string" and status:match("^http_") then
         return gettext("HTTP 错误: ") .. status:sub(6)
@@ -367,7 +368,12 @@ local function run_request_in_subprocess(task, callback, timeout)
         if self.stop_status and not (self.stop_status == "stale_request" and status == "http_404") then
             status = self.stop_status
         end
-        callback(status)
+        -- A throwing callback must not skip temp-file cleanup or wedge the
+        -- pending queue.
+        local called, callback_error = pcall(callback, status)
+        if not called then
+            logger.warn("一页壁纸: 结果回调异常", tostring(callback_error))
+        end
         cleanup_temporary_files()
         run_pending_work()
     end
@@ -378,7 +384,7 @@ local function run_request_in_subprocess(task, callback, timeout)
     return worker
 end
 
-local function download_image(year, month, day, date_str, is_active, callback)
+local function download_image(date_str, is_active, callback)
     local target = SAVE_DIR .. date_str .. ".jpg"
     local tmp = target .. ".tmp"
     local meta_target = SAVE_DIR .. date_str .. ".json"
@@ -584,7 +590,7 @@ function OnePage:init()
 end
 
 -- 请求完成回调：网络等待期间不占用 UI 事件循环。
-function OnePage:_download_today(t, today_str, opts, retry_attempt, notify_failure)
+function OnePage:_download_today(today_str, opts, retry_attempt, notify_failure)
     self:_cancel_retry()
     if active_worker or active_download then
         queue_download_check(opts)
@@ -595,7 +601,7 @@ function OnePage:_download_today(t, today_str, opts, retry_attempt, notify_failu
     active_download = request_token
     self._busy = true
     local generation = self._request_generation
-    local worker = download_image(t.year, t.month, t.day, today_str, function()
+    local worker = download_image(today_str, function()
         return not self._stopped and generation == self._request_generation
     end, function(success, status)
         if active_download == request_token then
@@ -939,7 +945,7 @@ end
 
 function OnePage:_retry_round(attempt, opts)
     if self._stopped or self._busy then return end
-    local t, today_str, today_path = get_today_info()
+    local _, today_str, today_path = get_today_info()
     if not (opts and opts.ignore_cooldown) and is_http404_cooling(today_str) then return end
     if is_valid_jpeg(today_path) then
         local _, _, invalid_source = self:_refresh_wallpaper(today_path)
@@ -959,7 +965,7 @@ function OnePage:_retry_round(attempt, opts)
         return
     end
 
-    self:_download_today(t, today_str, opts, attempt, false)
+    self:_download_today(today_str, opts, attempt, false)
 end
 
 -- 主入口：图片已存在走快速路径；缺失则下载；失败自动进入重试链
@@ -973,7 +979,7 @@ function OnePage:_run(opts)
     end
 
     util.makePath(SAVE_DIR)
-    local t, today_str, today_path = get_today_info()
+    local _, today_str, today_path = get_today_info()
     local today_ready = is_valid_jpeg(today_path)
     local _, wallpaper_error, invalid_source = self:_refresh_wallpaper(today_ready and today_path or nil, nil, opts and opts.notify)
 
@@ -1008,7 +1014,7 @@ function OnePage:_run(opts)
         return
     end
 
-    self:_download_today(t, today_str, opts, 0, true)
+    self:_download_today(today_str, opts, 0, true)
 end
 
 function OnePage:download_today()

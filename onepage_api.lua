@@ -15,10 +15,9 @@ local Api = {}
 
 Api.V3_BASE = "http://v3.wufazhuce.com:8000"
 Api.V3_QS = "?version=3.5.0&platform=android"
-Api.IMAGE_HOST = "^https?://image%.wufazhuce%.com/"
 -- The v3 endpoint is plain HTTP on port 8000, so hp_img_url arrives unauthenticated.
--- Only this host may ever be fetched: a tampered response must not be able to
--- point the downloader at an arbitrary server.
+-- This table is the single source of truth for both the thumbnail step and the
+-- download whitelist: a tampered response must not reach an arbitrary server.
 Api.IMAGE_HOSTS = { ["image.wufazhuce.com"] = true }
 Api.USER_AGENT = "Mozilla/5.0 (compatible; onepage.koplugin/0.1)"
 Api.MAX_IMAGE_BYTES = 4 * 1024 * 1024
@@ -28,22 +27,6 @@ Api.MAX_ID_PROBES = 10
 function Api.clean(value)
     if type(value) ~= "string" then return "" end
     return (value:gsub("[%z\1-\31\127]", " "):match("^%s*(.-)%s*$"))
-end
-
--- Keep the protocol the API gave us. The v3 endpoint only speaks plain HTTP on
--- port 8000, so the device already has plain HTTP access; using it for the CDN
--- too avoids TLS/CA-bundle differences across KOReader builds. Verified 200 on
--- 2026-11-08 for both http and https variants of the same image.
-function Api.normalize_image_url(url, width)
-    if type(url) ~= "string" or url == "" then return nil end
-    local base = url:gsub("^//", "http://")
-    if not base:match("^https?://") then return nil end
-    base = base:gsub("[?#].*$", "")
-    if base:match(Api.IMAGE_HOST) and width and tonumber(width) and tonumber(width) > 0 then
-        local w = math.floor(tonumber(width))
-        return base .. string.format("?imageMogr2/thumbnail/%dx/format/jpg", w)
-    end
-    return base
 end
 
 -- True only for the ONE image CDN. Redirect targets are checked with the same
@@ -56,6 +39,22 @@ function Api.is_allowed_image_url(url)
     return Api.IMAGE_HOSTS[host] == true
 end
 
+-- Keep the protocol the API gave us. The v3 endpoint only speaks plain HTTP on
+-- port 8000, so the device already has plain HTTP access; using it for the CDN
+-- too avoids TLS/CA-bundle differences across KOReader builds. Verified 200 on
+-- 2026-11-08 for both http and https variants of the same image.
+function Api.normalize_image_url(url, width)
+    if type(url) ~= "string" or url == "" then return nil end
+    local base = url:gsub("^//", "http://")
+    if not base:match("^https?://") then return nil end
+    base = base:gsub("[?#].*$", "")
+    if Api.is_allowed_image_url(base) and width and tonumber(width) and tonumber(width) > 0 then
+        local w = math.floor(tonumber(width))
+        return base .. string.format("?imageMogr2/thumbnail/%dx/format/jpg", w)
+    end
+    return base
+end
+
 local function iso_to_compact(makettime)
     if type(makettime) ~= "string" then return nil end
     local y, m, d = makettime:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
@@ -64,21 +63,33 @@ local function iso_to_compact(makettime)
 end
 Api.iso_to_compact = iso_to_compact
 
+-- hp_img_url can arrive as an empty string while hp_img_original_url still
+-- holds the real address; `a or b` would short-circuit on "" and reject the
+-- whole entry.
+local function detail_image_url(data)
+    local raw = data.hp_img_url
+    if type(raw) ~= "string" or raw == "" then raw = data.hp_img_original_url end
+    if type(raw) ~= "string" or raw == "" then return nil end
+    return Api.normalize_image_url(raw, 1080)
+end
+
 -- Normalise one hp/detail response into the fields the renderer needs.
--- Returns nil when the response is unusable (empty data, missing date/image).
-function Api.parse_detail(data)
-    if type(data) ~= "table" then return nil end
+-- Returns `meta`, or nil plus a reason, so pick_today can tell "this date is
+-- not published" apart from "the API changed shape".
+local function parse_detail_full(data)
+    if type(data) ~= "table" then return nil, "bad_detail" end
     local date = iso_to_compact(data.hp_makettime)
-    local image_url = Api.normalize_image_url(data.hp_img_url or data.hp_img_original_url, 1080)
-    if not date or not image_url then return nil end
+    if not date then return nil, "bad_date" end
+    local image_url = detail_image_url(data)
+    if not image_url then return nil, "bad_image" end
     -- Reject anything the CDN whitelist does not cover instead of downloading it.
-    if not Api.is_allowed_image_url(image_url) then return nil end
+    if not Api.is_allowed_image_url(image_url) then return nil, "invalid_host" end
 
     local text = Api.clean(data.hp_content)
     local quote, byline = text:match("^(.-)%s+by%s+(.+)$")
     if not quote then quote, byline = text, nil end
     quote = Api.clean(quote)
-    if quote == "" then return nil end
+    if quote == "" then return nil, "empty_quote" end
 
     local author = Api.clean(data.text_author_name)
     if author == "" then author = Api.clean(byline) end
@@ -113,6 +124,12 @@ function Api.parse_detail(data)
     }
 end
 
+-- Single-value wrapper for callers that only need the metadata.
+function Api.parse_detail(data)
+    local meta = parse_detail_full(data)
+    return meta
+end
+
 --[[
 Pick today's hp entry. `ids` is the idlist/0 array. Its order is date-descending
 and contiguous, but the numeric ids are scrambled (pre-allocated), so taking
@@ -126,38 +143,41 @@ Returns `meta` on success. On failure returns `nil` plus:
   nil            every probe answered, but none matched `date_str` (真未发布)
   "timeout"      the caller-provided deadline expired mid-probe
   "network_error"/"http_*"  no probe produced a usable response at all
+  "invalid_host" every answer pointed at a non-CDN image host
+  "bad_detail"   every answer was unusable (date/image/quote missing)
 
 The distinction matters: main.lua maps a bare nil to http_404 and then stops
-retrying for two hours, so a flaky network must never look like "not published".
+retrying for two hours, so a flaky network or a changed response shape must
+never look like "not published".
 ]]
 function Api.pick_today(ids, fetch_detail, date_str, max_probes, deadline)
     if type(ids) ~= "table" or type(fetch_detail) ~= "function" then return nil, "bad_args" end
     local limit = math.min(max_probes or Api.MAX_ID_PROBES, #ids, Api.MAX_ID_PROBES)
-    local responded, rejected, last_error = 0, 0, nil
+    local responded, host_rejected, malformed, last_error = 0, 0, 0, nil
     for i = 1, limit do
         if deadline and os.time() >= deadline then return nil, "timeout" end
         local data, err = fetch_detail(ids[i])
         if data then
             responded = responded + 1
-            local meta = Api.parse_detail(data)
+            local meta, reason = parse_detail_full(data)
             if meta and meta.date == date_str then return meta end
             if not meta then
-                -- Detail answered but its image URL is off-whitelist. If every
-                -- answer looks like that, report it instead of pretending the
-                -- date is unpublished (which would silence the plugin for 2h).
-                local url = Api.normalize_image_url(
-                    data.hp_img_url or data.hp_img_original_url, 1080)
-                if url and not Api.is_allowed_image_url(url) then
-                    rejected = rejected + 1
+                -- Report a uniform failure instead of pretending the date is
+                -- unpublished. A changed field name would otherwise hide here.
+                if reason == "invalid_host" then
+                    host_rejected = host_rejected + 1
+                else
+                    malformed = malformed + 1
                 end
             end
         elseif err then
             last_error = err
         end
     end
-    -- At least one detail parsed: the date really is not published yet.
+    -- At least one detail answered but matched no date: 真未发布.
     if responded > 0 then
-        if rejected == responded then return nil, "invalid_host" end
+        if host_rejected == responded then return nil, "invalid_host" end
+        if malformed == responded then return nil, "bad_detail" end
         return nil
     end
     return nil, last_error or "network_error"
@@ -315,13 +335,16 @@ Fetch everything needed for one day. opts:
 
 Returns one of: "downloaded", "no_today", "timeout", "network_error", "http_*",
 "decode", "invalid_file", "file_too_large", "invalid_host", "redirect_error",
-"open_error", "write_error".
+"bad_detail", "open_error", "write_error".
 ]]
 function Api.fetch_today(opts)
     opts = opts or {}
     local ids, err = get_json("/api/hp/idlist/0", opts.timeout)
     if not ids then return err or "network_error" end
-    if type(ids) ~= "table" or #ids == 0 then return "no_today" end
+    -- The idlist always carries history, so an empty array means a truncated or
+    -- reshaped response rather than "nothing published today". Retry it instead
+    -- of entering the 2h 404 cooldown.
+    if type(ids) ~= "table" or #ids == 0 then return "decode" end
 
     local function fetch_detail(id)
         -- Propagate the transport error: pick_today needs to tell "this probe

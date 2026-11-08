@@ -98,7 +98,8 @@ GET http://image.wufazhuce.com/Fl93rM1GcYl_kdoacl-qOqTiMqMY?imageMogr2/thumbnail
 | `redirect_error` | 图片 3xx 跳到非白名单域名，或跳转超过一次 | 拒绝下载，退避重试 |
 | `invalid_file` | JPEG 头尾或解码校验失败 | 删除临时文件，保留上一张壁纸 |
 | `file_too_large` | 超过 4 MiB | 同上 |
-| `decode` / `nojson` | JSON 解析失败 | 退避重试 |
+| `bad_detail` | 详情都拿到了，但字段不可用（日期格式、图片 URL、文案缺失） | 退避重试，**不进入 404 冷却** |
+| `decode` / `nojson` | JSON 解析失败，或 `idlist` 返回空数组（正常总带历史条目） | 退避重试 |
 | `write_error` | 元数据写入失败 | 退避重试 |
 
 `no_today` 与 `network_error` 必须区分：前者说明服务端明确没有今天的内容，可以安静等 2 小时；后者只是这一次没连上，若误判成 `no_today`，弱网下会整天不出图。

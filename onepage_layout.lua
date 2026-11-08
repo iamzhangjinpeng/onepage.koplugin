@@ -144,7 +144,9 @@ function Layout.validate(L)
         end
     end
     for name, size in pairs(L.fonts) do
-        if size < 10 then return false, "font too small: " .. name end
+        if type(size) ~= "number" or size <= 0 then
+            return false, "invalid font size: " .. name
+        end
     end
     return true
 end

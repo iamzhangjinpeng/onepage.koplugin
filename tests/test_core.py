@@ -100,6 +100,14 @@ class TestApiParsing(LuaTestCase):
             "http://image.wufazhuce.com@evil.example/abc"))
         self.assertFalse(self.api.is_allowed_image_url("javascript:alert(1)"))
 
+    def test_parse_detail_falls_back_to_original_url_when_primary_is_empty(self):
+        """`hp_img_url or hp_img_original_url` short-circuits on the empty string."""
+        meta = self.api.parse_detail(self.detail(
+            hp_img_url="", hp_img_original_url="http://image.wufazhuce.com/fallback"))
+        self.assertIsNotNone(meta)
+        self.assertTrue(meta["image_url"].startswith(
+            "http://image.wufazhuce.com/fallback"))
+
     def test_parse_detail_rejects_non_cdn_image_host(self):
         """The v3 endpoint is plain HTTP; a tampered hp_img_url must not be fetched."""
         meta = self.api.parse_detail(self.detail(
@@ -227,6 +235,24 @@ class TestPickToday(LuaTestCase):
         self.assertIsNone(meta)
         self.assertEqual(err, "invalid_host")
 
+    def test_all_unusable_details_report_bad_detail(self):
+        """A renamed hp_content field must not masquerade as an unpublished day."""
+        fetch = self.wrap_fetch(lambda _: self.detail(hp_content=""))
+        meta, err = self.pick(self.api, self.ids(), fetch, "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "bad_detail")
+
+    def test_mixed_unusable_and_valid_answers_is_still_not_published(self):
+        """One well-formed answer with another date means the date really is absent."""
+        def fetch(hp_id):
+            if str(hp_id) == "5283":
+                return self.detail(hp_content="")
+            return self.detail(hp_makettime="2026-11-07 06:00:00")
+
+        meta, err = self.pick(self.api, self.ids(), self.wrap_fetch(fetch), "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "")
+
     def test_deadline_stops_probing(self):
         fetch = self.wrap_fetch(lambda _: self.detail(hp_makettime="2026-11-01 06:00:00"))
         meta, err = self.pick(self.api, self.ids(), fetch, "20261108", 10, 1)
@@ -256,6 +282,13 @@ class TestLayout(LuaTestCase):
                         self.assertEqual(c["photo"]["h"] + c["cat"]["h"] + c["info"]["h"], c["h"])
                         self.assertEqual(c["info"]["w"] + c["date"]["w"], c["w"])
                         self.assertGreaterEqual(L["fonts"]["quote"], 11)
+
+    def test_validate_rejects_invalid_font_size(self):
+        L = self.layout.for_screen(1072, 1448, "card", "high")
+        L["fonts"]["quote"] = 0
+        ok, reason = self.validate(self.layout, L)
+        self.assertFalse(ok)
+        self.assertIn("quote", reason)
 
     def test_card_has_rounded_bounds_and_branding(self):
         L = self.layout.for_screen(1072, 1448, "card", "high")
