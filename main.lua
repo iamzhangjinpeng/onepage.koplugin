@@ -203,6 +203,14 @@ local function is_valid_jpeg(path)
     return head == "\255\216" and tail == "\255\217"
 end
 
+-- Changes whenever the file is replaced, so a memo about a broken JPEG does not
+-- survive the re-download of a good one.
+local function source_fingerprint(path)
+    local attrs = has_lfs and lfs.attributes(path)
+    if not attrs then return nil end
+    return tostring(attrs.modification) .. ":" .. tostring(attrs.size)
+end
+
 local function is_network_available()
     if NetworkMgr and NetworkMgr.isConnected then
         local ok, connected = pcall(NetworkMgr.isConnected, NetworkMgr)
@@ -221,11 +229,16 @@ local function each_jpg(callback)
     end
 end
 
-local function latest_cached_image()
+-- `skip` is a JPEG that already proved undecodable: it passes is_valid_jpeg,
+-- so nothing else here would filter it out, and re-selecting it just pays for
+-- the same failed decode again.
+local function latest_cached_image(skip)
     local latest
     each_jpg(function(name)
+        local path = SAVE_DIR .. name
         if name:match("^%d%d%d%d%d%d%d%d%.jpg$")
-            and (not latest or name > latest) and is_valid_jpeg(SAVE_DIR .. name) then
+            and path ~= skip
+            and (not latest or name > latest) and is_valid_jpeg(path) then
             latest = name
         end
     end)
@@ -253,7 +266,12 @@ local function cleanup_temporary_files()
     if active_worker or not has_lfs or lfs.attributes(SAVE_DIR, "mode") ~= "directory" then return end
     for name in lfs.dir(SAVE_DIR) do
         if name:match("^%d%d%d%d%d%d%d%d%.jpg%.tmp$")
-            or name:match("^%d%d%d%d%d%d%d%d%.json%.tmp$") then
+            or name:match("^%d%d%d%d%d%d%d%d%.json%.tmp$")
+            -- macOS drops "._name" AppleDouble files on FAT volumes whenever
+            -- a file is copied over USB. No anchored pattern in this plugin
+            -- matches them, so they were neither used nor ever removed: they
+            -- just accumulated at 4 KB a piece.
+            or name:match("^%._") then
             local path = SAVE_DIR .. name
             if lfs.attributes(path, "mode") == "file" then
                 local ok, err = os.remove(path)
@@ -720,17 +738,26 @@ function OnePage:_download_today(today_str, opts, retry_attempt, notify_failure)
     if active_download == request_token then self._download_worker = worker end
 end
 
-function OnePage:_refresh_wallpaper(source, refresh, verify_cache)
+function OnePage:_refresh_wallpaper(source, refresh, verify_cache, skip_source)
     local ok, available, failure, invalid_source = pcall(function()
         local Wallpaper = require("onepage_wallpaper")
-        source = source or latest_cached_image()
+        source = source or latest_cached_image(skip_source)
         return Wallpaper.prepare(WALLPAPER_DIR, source, wallpaper_style(), refresh, verify_cache, WALLPAPER_DISPLAY_DIR)
     end)
     if not ok then
         failure, available = available or "Wallpaper preparation failed", false
         logger.warn("一页壁纸: 壁纸更新失败", tostring(failure))
     end
-    self._undecodable_source = invalid_source and source or nil
+    -- Remember *which* file failed to decode, with its fingerprint. A JPEG can
+    -- pass is_valid_jpeg (header + footer + size) and still be garbage, and the
+    -- retry chain runs every 10-120 s: without this, each attempt paid for the
+    -- same 1-2 s decode before deciding to download again.
+    if invalid_source and source then
+        self._undecodable_path = source
+        self._undecodable_print = source_fingerprint(source)
+    elseif source then
+        self._undecodable_path, self._undecodable_print = nil, nil
+    end
     return available, failure, invalid_source
 end
 
@@ -1052,7 +1079,16 @@ function OnePage:_run(opts)
     util.makePath(SAVE_DIR)
     local _, today_str, today_path = get_today_info()
     local today_ready = is_valid_jpeg(today_path)
-    local _, wallpaper_error, invalid_source = self:_refresh_wallpaper(today_ready and today_path or nil, nil, opts and opts.notify)
+    -- Same file that already failed to decode: skip the decode entirely and go
+    -- straight to the download. The fingerprint makes this self-healing -- a
+    -- re-downloaded file has a new mtime/size and is tried normally.
+    local skip_source
+    if today_ready and self._undecodable_path == today_path
+        and self._undecodable_print == source_fingerprint(today_path) then
+        today_ready, skip_source = false, today_path
+    end
+    local _, wallpaper_error, invalid_source =
+        self:_refresh_wallpaper(today_ready and today_path or nil, nil, opts and opts.notify, skip_source)
 
     -- 自动和手动下载均复用有效今日图，避免不必要的重复请求。
     if today_ready and not invalid_source then
@@ -1239,7 +1275,7 @@ function OnePage:_diagnostics()
     local _, today_str, today_path = get_today_info()
     local lines = {}
     lines[#lines + 1] = gettext("目录: ") .. SAVE_DIR
-    if self._undecodable_source ~= today_path and is_valid_jpeg(today_path) then
+    if self._undecodable_path ~= today_path and is_valid_jpeg(today_path) then
         lines[#lines + 1] = gettext("今日图片: 已就绪 (") .. today_str .. ")"
     elseif file_exists(today_path) then
         lines[#lines + 1] = gettext("今日图片: 文件损坏")
