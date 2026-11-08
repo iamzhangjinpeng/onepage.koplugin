@@ -97,10 +97,10 @@ USB 的时机：Kindle 停在主页（KOReader 已退出）时插线才会挂载
 
 ### 9. 在线更新
 
-前置：仓库已发布 v0.1.1。三项必须精确——tag 带 `v`（`v0.1.1`，不是 `0.1.1`）、asset 文件名正好是 `onepage.koplugin-v0.1.1.zip`、不勾 drafts / prerelease。设备上仍是 0.1.0。
+前置：仓库已发布一个高于设备当前版本的新版本（下面以 0.2.0 为例）。三项必须精确——tag 带 `v`（`v0.2.0`，不是 `0.2.0`）、asset 文件名正好是 `onepage.koplugin-v0.2.0.zip`、不勾 drafts / prerelease。
 
 菜单 → 检查插件更新。
-**通过**：弹出「发现一页壁纸新版本 0.1.1 / 当前版本 0.1.0」和发布说明；点「下载安装」后提示重启；重启后 `_meta.lua` 里是 `0.1.1`；`plugins/onepage.koplugin.previous/` 在下次成功出图后被删掉；全程 `crash.log` 无 traceback。
+**通过**：弹出「发现一页壁纸新版本 0.2.0 / 当前版本 x.y.z」和发布说明；点「下载安装」后提示重启；重启后 `_meta.lua` 里是新版本号；`plugins/onepage.koplugin.previous/` 在下次成功出图后被删掉；`crash.log` 里依次有「发现新版本」「插件已更新到」两行，无 traceback。
 
 失败时按提示串定位：
 

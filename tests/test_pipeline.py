@@ -399,7 +399,9 @@ class TestFetchToday(FetchCase):
 # Update.check: release JSON hardening
 # ---------------------------------------------------------------------------
 
-VERSION = "0.1.0"
+# Deliberately unrelated to the shipping version: these cases are about the
+# JSON contract, not about which release happens to be current.
+VERSION = "9.9.9"
 ASSET_ID = 412345678
 DIGEST = "a" * 64
 
@@ -448,10 +450,10 @@ class TestUpdateCheck(FakeRuntime):
         self.assertEqual(parsed["notes"], "修正分隔线")
 
     def test_same_version_is_current(self):
-        self.assertEqual(self.check(current="0.1.0"), "current")
+        self.assertEqual(self.check(current=VERSION), "current")
 
     def test_newer_local_version_is_current(self):
-        self.assertEqual(self.check(current="0.2.0"), "current")
+        self.assertEqual(self.check(current="10.0.0"), "current")
 
     def test_draft_release_is_refused(self):
         self.assertEqual(self.check(release(draft=True)), "bad_release")
