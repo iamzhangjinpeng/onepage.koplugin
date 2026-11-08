@@ -53,8 +53,8 @@ local WALLPAPER_DISPLAY_DIR = WALLPAPER_DIR .. "display/"
 -- 一页壁纸按北京时间发布；固定偏移，不依赖设备时区
 local UTC_OFFSET = 8 * 3600
 
+-- Deadlines below are offsets from "now" and are stored as os.time() seconds.
 local INIT_DELAY       = 8        -- 启动后首次检查延迟（秒）
-local RESUME_DELAY     = 2        -- 唤醒后检查延迟（秒）
 local CHECK_INTERVAL   = 5 * 60   -- 周期兜底检查（秒）
 local MAX_RETRIES      = 6        -- Wi-Fi 重连等待的最大轮数
 local RETRY_BASE       = 10       -- 退避基数（秒）
@@ -644,7 +644,6 @@ function OnePage:init()
 
     local now = os.time()
     self._startup_at = now + INIT_DELAY
-    self._resume_at = nil
     self._retry_at = nil
     self._retry_attempt = nil
     self._retry_opts = nil
@@ -899,7 +898,6 @@ function OnePage:_cancel_scheduled_work()
     self._request_generation = self._request_generation + 1
     self._busy = false
     self._startup_at = nil
-    self._resume_at = nil
     self._retry_at = nil
     self._retry_attempt = nil
     self._retry_opts = nil
@@ -935,11 +933,13 @@ function OnePage:stopPlugin()
     self:_restore_screensaver_settings(false)
 end
 
-function OnePage:onResume()
-    if self._stopped or active_instance ~= self or update_needs_restart then return end
-    self._resume_at = os.time() + RESUME_DELAY
-    self:_schedule_next_check()
-end
+-- There is deliberately no Resume hook here. KOReader broadcasts "Resume" to
+-- the widgets on its window stack (Device:_afterResume -> UIManager:
+-- broadcastEvent), and a plugin instance is not one of them: PluginLoader only
+-- calls init(). An onResume method on this class therefore never ran. Wake-up
+-- does not need one -- UIManager timers do not advance while the device is
+-- suspended, so on the first tick after resume the loop deadline is already in
+-- the past and _run fires immediately.
 
 -- Wi-Fi 是否开启（与“是否已拿到 IP”分开判断）
 function OnePage:_wifi_on()
@@ -973,7 +973,7 @@ schedule_next_check = function()
     local instance = active_instance
     if instance and not instance._stopped and not update_needs_restart then
         local now = os.time()
-        for _, key in ipairs({ "_startup_at", "_resume_at", "_retry_at", "_loop_at" }) do
+        for _, key in ipairs({ "_startup_at", "_retry_at", "_loop_at" }) do
             local deadline = instance[key]
             if deadline then consider(deadline - now) end
         end
@@ -1005,10 +1005,6 @@ function OnePage:_process_scheduled_work()
         self._startup_at = nil
         should_run = true
     end
-    if self._resume_at and self._resume_at <= now then
-        self._resume_at = nil
-        should_run = true
-    end
     if self._loop_at and self._loop_at <= now then
         self._loop_at = now + CHECK_INTERVAL
         should_run = true
@@ -1023,7 +1019,9 @@ function OnePage:_process_scheduled_work()
     if should_run and not self._busy then self:_run() end
 end
 
--- Periodic fallback shares the central timer with startup, resume and retries.
+-- Periodic fallback shares the central timer with startup and retries. This is
+-- also what catches a new day after a wake: the deadline is stale by then, so
+-- the first tick after resume fires it immediately.
 function OnePage:_schedule_loop()
     if self._stopped or active_instance ~= self then return end
     if not self._loop_at then self._loop_at = os.time() + CHECK_INTERVAL end
