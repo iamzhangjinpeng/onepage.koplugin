@@ -93,7 +93,7 @@ GET http://image.wufazhuce.com/Fl93rM1GcYl_kdoacl-qOqTiMqMY?imageMogr2/thumbnail
 | `no_today` | **至少一次** detail 探测拿到了响应，但日期都不匹配（真未发布） | 映射为 `http_404`，冷却 2 小时，保留上一张壁纸 |
 | `http_404` | HTTP 404 | 同上 |
 | `network_error` / `http_5xx` | 一次可用响应都没拿到（全部探测失败） | 指数退避重试，最多 6 轮，**不进入冷却** |
-| `timeout` | 探测途中的总时限耗尽（默认 60 秒任务预算） | 退避重试 |
+| `timeout` | 单次请求 20 秒超时（LuaSocket 的 `"timeout"`），或探测途中的 60 秒任务预算耗尽 | 退避重试 |
 | `invalid_host` | 图片 URL 不在 `image.wufazhuce.com` 白名单 | 拒绝下载，**冷却 1 小时**（域名迁移不会自愈） |
 | `redirect_error` | 图片 3xx 跳到非白名单域名，或跳转超过一次 | 拒绝下载，**冷却 1 小时** |
 | `invalid_file` | JPEG 头尾或解码校验失败 | 删除临时文件，保留上一张壁纸，退避重试 |

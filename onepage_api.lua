@@ -220,7 +220,15 @@ local function transport(url, timeout, accept, sink)
         redirect = false,
     })
     if not called then return nil, "network_error" end
-    if not result then return nil, "network_error" end
+    if not result then
+        -- LuaSocket puts socket-level failures in the code slot as a string:
+        -- "timeout", "closed", "refused". They are not HTTP statuses, so they
+        -- must not surface as "http_timeout" in the status line. A timeout is
+        -- worth its own status: it means the link is slow, not that the server
+        -- said no, and both are retried.
+        if code == "timeout" then return nil, "timeout" end
+        return nil, "network_error"
+    end
     if code ~= 200 then return nil, "http_" .. tostring(code or "unknown"), headers end
     return true, code, headers
 end
