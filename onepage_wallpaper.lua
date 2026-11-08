@@ -490,16 +490,17 @@ local function prune_replaced_cache(paths, keep, date)
     end
 end
 
--- Newest first. `width`/`height` are a preference, not a filter: a wallpaper
--- rendered for the previous orientation is still better than none, so a
--- dimension mismatch is remembered as a fallback instead of being skipped.
+-- Newest first. The dimensions are exact, not a preference: the screensaver is
+-- always composed into the portrait rectangle, so a PNG rendered at any other
+-- size can never be shown undistorted again. Left on disk it would still be
+-- picked as a fallback and published squashed, so it is deleted instead.
 local function find_cached_wallpaper(paths, newer_than, cache_style, width, height)
     table.sort(paths, function(a, b)
         local left, right = cache_key(a), cache_key(b)
         if left ~= right then return left > right end
         return a < b
     end)
-    local fallback, failure
+    local failure
     for _, path in ipairs(paths) do
         local d, style, w, h = cache_parts(path)
         local usable = d and (not newer_than or d > newer_than)
@@ -508,7 +509,7 @@ local function find_cached_wallpaper(paths, newer_than, cache_style, width, heig
             local valid = cached_png_is_valid(path)
             if valid then
                 if not width or (w == width and h == height) then return path end
-                fallback = fallback or path
+                remove_wallpaper(path)
             elseif valid == false then
                 remove_wallpaper(path)
             else
@@ -516,7 +517,7 @@ local function find_cached_wallpaper(paths, newer_than, cache_style, width, heig
             end
         end
     end
-    return fallback, failure
+    return nil, failure
 end
 
 local function copy_png(source, target, size)
@@ -614,13 +615,29 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
     local previous = generated_images(dir)
     local tmp = dir .. "wallpaper.png.tmp"
     os.remove(tmp)
-    -- Render for the orientation the device is in right now. Forcing min/max
-    -- (always portrait) meant a landscape screen had to stretch a portrait PNG,
-    -- and KOReader's screensaver stretch is enabled by this plugin, so the
-    -- result was a squashed wallpaper. The cache key carries the dimensions,
-    -- so both variants can coexist.
+    -- Always render portrait, even when the panel is currently rotated.
+    -- Screensaver:show() calls modeExpectsPortrait() first, and for an image
+    -- screensaver that is always true: it flips the framebuffer back to
+    -- DEVICE_ROTATED_UPRIGHT and swaps screen_w/screen_h before building the
+    -- widget. So the image is *always* composed into a portrait rectangle.
+    -- Rendering at the rotated size meant KOReader then squeezed that PNG back
+    -- into portrait, which is the "stretched portrait wallpaper" that showed up
+    -- when locking in landscape.
     local screen = require("device").screen
     local width, height = screen:getWidth(), screen:getHeight()
+    if width > height then width, height = height, width end
+    -- Sweep leftovers from the builds that rendered at the rotated size before
+    -- anything can select them: they sort first (same day) and would be
+    -- published squashed.
+    local stale
+    for _, path in ipairs(previous) do
+        local _, _, w, h = cache_parts(path)
+        if w and (w ~= width or h ~= height) then
+            remove_wallpaper(path)
+            stale = true
+        end
+    end
+    if stale then previous = generated_images(dir) end
     local failure, invalid_source
     if source then
         local attrs = lfs.attributes(source)
