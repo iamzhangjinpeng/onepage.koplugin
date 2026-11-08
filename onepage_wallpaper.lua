@@ -321,10 +321,12 @@ local function render(source, target, width, height, style, contrast)
 
         eink = Blitbuffer.new(width, height, Blitbuffer.TYPE_BB8)
         eink:ditherblitFrom(canvas, 0, 0, 0, 0, width, height)
+        -- writeToFile's success convention is not uniform across KOReader
+        -- versions and formats (writePNG returns nothing on some builds), so
+        -- only an explicit false counts as failure. The PNG decode check right
+        -- below is the real gate: it catches a truncated or unwritten file.
         local written, write_detail = eink:writeToFile(target, "png")
-        if not written then
-            -- writeToFile returns (false, err); asserting on `detail or written`
-            -- would pass the boolean false as the error message.
+        if written == false then
             local reason = type(write_detail) == "string" and write_detail
                 or "Cannot write the wallpaper PNG"
             error(reason, 0)

@@ -314,7 +314,7 @@ local function status_text(status)
     elseif status == "rename_error" then return gettext("文件替换失败")
     elseif status == "write_error" then return gettext("元数据写入失败")
     elseif status == "no_today" then return gettext("今日内容尚未发布")
-    elseif status == "bad_detail" then return gettext("接口返回内容不完整，稍后重试")
+    elseif status == "bad_detail" then return gettext("接口返回内容不完整")
     elseif status == "decode" or status == "nojson" then return gettext("接口返回无法解析")
     elseif type(status) == "string" and status:match("^http_") then
         return gettext("HTTP 错误: ") .. status:sub(6)

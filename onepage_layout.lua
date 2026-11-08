@@ -86,13 +86,21 @@ function Layout.for_screen(width, height, style, contrast)
 
     local box = result.content
     local unit = style == "card" and box.w or width
+    -- Every size below is derived from the width, which assumes a portrait
+    -- screen. A landscape card is wide but short: on a 1448x1072 screen the
+    -- content box is 1162x701, so a 107px day numeral (from a 1162px width)
+    -- would not fit its 86px slot and TextBoxWidget would spill it into the
+    -- month line. Cap each size by the height it actually has to live in.
+    -- Portrait layouts are unaffected: the caps only bind in landscape.
+    local quote = round(unit * (style == "card" and 0.039 or 0.033))
+    local quote_min = math.max(10, round(unit * 0.024))
     result.fonts = {
-        quote = math.max(11, round(unit * (style == "card" and 0.039 or 0.033))),
-        quote_min = math.max(10, round(unit * 0.024)),
-        category = math.max(10, round(unit * 0.022)),
+        quote = math.max(11, math.min(quote, math.floor(box.info.h * 0.17))),
+        quote_min = math.min(quote_min, math.max(11, quote)),
+        category = math.max(10, math.min(round(unit * 0.022), math.floor(box.cat.h * 0.7))),
         vol = math.max(10, round(unit * 0.022)),
         month = math.max(10, round(unit * 0.022)),
-        day = math.max(24, round(unit * 0.092)),
+        day = math.max(24, math.min(round(unit * 0.092), math.floor(box.date.h * 0.32))),
         header = math.max(10, round(width * 0.019)),
         footer = math.max(10, round(width * 0.017)),
     }

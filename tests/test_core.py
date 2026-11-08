@@ -283,6 +283,23 @@ class TestLayout(LuaTestCase):
                         self.assertEqual(c["info"]["w"] + c["date"]["w"], c["w"])
                         self.assertGreaterEqual(L["fonts"]["quote"], 11)
 
+    def test_fonts_fit_their_slots_in_every_orientation(self):
+        """Width-derived sizes overflow a landscape card, which is wide but short.
+
+        cfont's line height is roughly 1.35x the point size; the day numeral gets
+        45% of the date column and the category band is only ~5% of the card.
+        """
+        for width, height in self.SCREENS:
+            for style in ["fullscreen", "card"]:
+                with self.subTest(size=(width, height), style=style):
+                    L = self.layout.for_screen(width, height, style, "high")
+                    c = L["content"]
+                    fonts = L["fonts"]
+                    self.assertLessEqual(fonts["day"] * 1.35, c["date"]["h"] * 0.45 + 1)
+                    self.assertLessEqual(fonts["category"] * 1.35, c["cat"]["h"] + 1)
+                    self.assertLessEqual(fonts["quote_min"], fonts["quote"])
+                    self.assertGreaterEqual(fonts["day"], 24)
+
     def test_validate_rejects_invalid_font_size(self):
         L = self.layout.for_screen(1072, 1448, "card", "high")
         L["fonts"]["quote"] = 0
