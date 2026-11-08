@@ -321,8 +321,14 @@ local function render(source, target, width, height, style, contrast)
 
         eink = Blitbuffer.new(width, height, Blitbuffer.TYPE_BB8)
         eink:ditherblitFrom(canvas, 0, 0, 0, 0, width, height)
-        local called, written, detail = eink:writeToFile(target, "png")
-        assert(called and written ~= false, detail or written or "Cannot write the wallpaper PNG")
+        local written, write_detail = eink:writeToFile(target, "png")
+        if not written then
+            -- writeToFile returns (false, err); asserting on `detail or written`
+            -- would pass the boolean false as the error message.
+            local reason = type(write_detail) == "string" and write_detail
+                or "Cannot write the wallpaper PNG"
+            error(reason, 0)
+        end
         assert(valid_png(target, lfs.attributes(target)), "Incomplete wallpaper PNG")
         return true
     end)
@@ -489,8 +495,12 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
         local date = source:match("(%d%d%d%d%d%d%d%d)%.jpg$")
         if attrs and date then
             local screen = require("device").screen
-            local sw, sh = screen:getWidth(), screen:getHeight()
-            local width, height = math.min(sw, sh), math.max(sw, sh)
+            -- Render for the orientation the device is in right now. Forcing
+            -- min/max (always portrait) meant a landscape screen had to stretch
+            -- a portrait PNG, and KOReader's screensaver stretch is enabled by
+            -- this plugin, so the result was a squashed wallpaper. The cache
+            -- key already carries the dimensions, so both variants can coexist.
+            local width, height = screen:getWidth(), screen:getHeight()
             local key = string.format("%s-%s-v%d-%dx%d-%d-%d.png", date, cache_style,
                 Wallpaper.CACHE_VERSION, width, height, attrs.modification, attrs.size)
             local target = dir .. key

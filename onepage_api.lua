@@ -22,6 +22,9 @@ Api.IMAGE_HOSTS = { ["image.wufazhuce.com"] = true }
 Api.USER_AGENT = "Mozilla/5.0 (compatible; onepage.koplugin/0.1)"
 Api.MAX_IMAGE_BYTES = 4 * 1024 * 1024
 Api.MIN_IMAGE_BYTES = 1024
+-- The v3 endpoint is plain HTTP, so nothing bounds the response size but us.
+-- 512 KB is ~50x the real payload of an idlist or detail call.
+Api.MAX_JSON_BYTES = 512 * 1024
 Api.MAX_ID_PROBES = 10
 
 function Api.clean(value)
@@ -195,7 +198,16 @@ local function transport(url, timeout, accept, sink)
     if not ok or not mod then return nil, "network_error" end
     local sock_ok, socketutil = pcall(require, "socketutil")
     if sock_ok and socketutil and socketutil.set_timeout then
-        pcall(socketutil.set_timeout, timeout or 20, timeout or 20)
+        -- set_timeout is declared with a colon upstream and writes
+        -- self.block_timeout, so the module has to be passed explicitly.
+        -- Calling it as socketutil.set_timeout(20, 20) handed the number 20 as
+        -- `self`, raised inside the pcall, and silently kept LuaSocket's 60s
+        -- default: every request could then eat the whole job budget.
+        -- Block timeout catches a silent peer; the total one is looser because
+        -- the CDN occasionally serves the 774 KB original instead of the 75 KB
+        -- thumbnail, and a slow link still has to finish that.
+        local block = timeout or 20
+        pcall(socketutil.set_timeout, socketutil, block, block * 3)
     end
     local called, result, code, headers = pcall(mod.request, {
         url = url,
@@ -214,12 +226,19 @@ local function transport(url, timeout, accept, sink)
 end
 
 local function get_json(path, timeout)
-    local chunks = {}
+    local chunks, received, too_large = {}, 0, false
     local ok, err = transport(Api.V3_BASE .. path .. Api.V3_QS, timeout,
         "application/json", function(chunk)
-            if chunk then chunks[#chunks + 1] = chunk end
+            if not chunk then return 1 end
+            received = received + #chunk
+            if received > Api.MAX_JSON_BYTES then
+                too_large = true
+                return nil, "size limit"
+            end
+            chunks[#chunks + 1] = chunk
             return 1
         end)
+    if too_large then return nil, "decode" end
     if not ok then return nil, err end
     local decoded_ok, decoder = pcall(require, "dkjson")
     if not decoded_ok or not decoder then return nil, "nojson" end
@@ -331,7 +350,8 @@ Fetch everything needed for one day. opts:
   image_tmp   staging path for the JPEG (parent renames it)
   meta_tmp    staging path for the metadata JSON
   timeout     per-request timeout in seconds
-  deadline    os.time() value after which probing stops (whole-job budget)
+  deadline    os.time() value after which probing stops (whole-job budget);
+              each request is clamped to the remaining budget
 
 Returns one of: "downloaded", "no_today", "timeout", "network_error", "http_*",
 "decode", "invalid_file", "file_too_large", "invalid_host", "redirect_error",
@@ -339,7 +359,21 @@ Returns one of: "downloaded", "no_today", "timeout", "network_error", "http_*",
 ]]
 function Api.fetch_today(opts)
     opts = opts or {}
-    local ids, err = get_json("/api/hp/idlist/0", opts.timeout)
+    -- A probe started 5s before the deadline must not be allowed to block for
+    -- the full per-request timeout: the parent SIGKILLs the whole job at
+    -- DOWNLOAD_TIMEOUT, which would skip the graceful "timeout" report and the
+    -- temp-file cleanup that goes with it.
+    local function budget()
+        local timeout = opts.timeout
+        if opts.deadline then
+            local remaining = opts.deadline - os.time()
+            if remaining < 1 then return 1 end
+            if not timeout or remaining < timeout then return remaining end
+        end
+        return timeout
+    end
+
+    local ids, err = get_json("/api/hp/idlist/0", budget())
     if not ids then return err or "network_error" end
     -- The idlist always carries history, so an empty array means a truncated or
     -- reshaped response rather than "nothing published today". Retry it instead
@@ -349,13 +383,13 @@ function Api.fetch_today(opts)
     local function fetch_detail(id)
         -- Propagate the transport error: pick_today needs to tell "this probe
         -- failed" apart from "this probe answered with another date".
-        return get_json("/api/hp/detail/" .. tostring(id), opts.timeout)
+        return get_json("/api/hp/detail/" .. tostring(id), budget())
     end
     local meta, pick_error = Api.pick_today(ids, fetch_detail, opts.date_str,
         nil, opts.deadline)
     if not meta then return pick_error or "no_today" end
 
-    local status = write_image(meta.image_url, opts.image_tmp, opts.timeout)
+    local status = write_image(meta.image_url, opts.image_tmp, budget())
     if status ~= "downloaded" then return status end
 
     local file = io.open(opts.meta_tmp, "wb")

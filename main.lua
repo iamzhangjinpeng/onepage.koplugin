@@ -40,6 +40,8 @@ local pending_download_check = false
 local pending_download_opts
 local http404_cooldown_date
 local http404_cooldown_until
+local hard_cooldown_date
+local hard_cooldown_until
 
 -- Absolute plugin path, also used by the forked downloader to load the API
 -- module (a child process cannot rely on KOReader's package.path).
@@ -64,6 +66,21 @@ local DOWNLOAD_TIMEOUT = 60       -- 下载子进程总时限（秒），由父�
 local UPDATE_TIMEOUT   = 60
 local WORKER_POLL_INTERVAL = 0.125
 local HTTP404_COOLDOWN = 2 * 3600 -- 今日图未发布 (404) 后的冷却（秒）
+-- Failures that will not fix themselves in five minutes: a changed response
+-- shape, a CDN migration, a missing JSON decoder, a 4xx other than "not
+-- published". Retrying them on the 5-minute loop produced ~144 requests per
+-- cycle forever; one probe per hour is enough to notice a fix.
+local HARD_FAILURE_COOLDOWN = 3600
+local HARD_FAILURE_STATUSES = {
+    bad_detail = true,
+    invalid_host = true,
+    nojson = true,
+    -- The CDN dropped the imageMogr2 parameters and served something far
+    -- bigger than the thumbnail, or answered with a redirect we refuse to
+    -- follow: both stay true for the rest of the day.
+    file_too_large = true,
+    redirect_error = true,
+}
 local MIN_JPEG_SIZE    = 1024
 
 local SETTING_AUTO_SCREENSAVER = "onepage_auto_screensaver"
@@ -94,6 +111,24 @@ local function is_http404_cooling(date_str)
     return http404_cooldown_date == date_str
         and http404_cooldown_until ~= nil
         and os.time() < http404_cooldown_until
+end
+
+-- "Not published yet" is a scheduled state; a reshaped response or a dead CDN
+-- host is a broken state. They need different cooldowns and different copy.
+local function is_hard_failure(status)
+    if type(status) ~= "string" then return false end
+    if HARD_FAILURE_STATUSES[status] then return true end
+    return status:match("^http_4") ~= nil and status ~= "http_404"
+end
+
+local function is_hard_cooling(date_str)
+    return hard_cooldown_date == date_str
+        and hard_cooldown_until ~= nil
+        and os.time() < hard_cooldown_until
+end
+
+local function start_hard_cooldown(date_str)
+    hard_cooldown_date, hard_cooldown_until = date_str, os.time() + HARD_FAILURE_COOLDOWN
 end
 
 local function queue_download_check(opts)
@@ -650,6 +685,16 @@ function OnePage:_download_today(today_str, opts, retry_attempt, notify_failure)
             if notify_failure and opts and opts.notify then
                 UIManager:show(InfoMessage:new{ text = gettext("今日图片未发布 (404)"), timeout = 3 })
             end
+        elseif is_hard_failure(status) then
+            start_hard_cooldown(today_str)
+            self:_cancel_retry()
+            logger.warn("一页壁纸: 接口进入冷却", status)
+            if notify_failure and opts and opts.notify then
+                UIManager:show(InfoMessage:new{
+                    text = status_text(status) .. gettext("（1 小时内不再重试）"),
+                    timeout = 3,
+                })
+            end
         else
             self:_schedule_retry(retry_attempt, opts)
             if notify_failure and opts and opts.notify then
@@ -947,6 +992,7 @@ function OnePage:_retry_round(attempt, opts)
     if self._stopped or self._busy then return end
     local _, today_str, today_path = get_today_info()
     if not (opts and opts.ignore_cooldown) and is_http404_cooling(today_str) then return end
+    if not (opts and opts.ignore_cooldown) and is_hard_cooling(today_str) then return end
     if is_valid_jpeg(today_path) then
         local _, _, invalid_source = self:_refresh_wallpaper(today_path)
         if not invalid_source then
@@ -999,6 +1045,12 @@ function OnePage:_run(opts)
     -- 今日图确认未发布后，冷却期内不再打服务器。
     if not (opts and opts.ignore_cooldown) and is_http404_cooling(today_str) then
         logger.dbg("一页壁纸: 今日图未发布，冷却中，跳过")
+        return
+    end
+
+    -- 接口结构异常或 CDN 换域名后，同样不再每 5 分钟重试一次。
+    if not (opts and opts.ignore_cooldown) and is_hard_cooling(today_str) then
+        logger.dbg("一页壁纸: 接口不可用，冷却中，跳过")
         return
     end
 
@@ -1110,7 +1162,14 @@ function OnePage:_check_plugin_update()
     end
     if not is_network_available() then update_message(gettext("无网络连接")); return end
 
-    local Update = require("onepage_update")
+    -- Loaded lazily: if the module is missing or broken, the menu entry must
+    -- say so instead of throwing a traceback out of the menu callback.
+    local loaded, Update = pcall(require, "onepage_update")
+    if not loaded or type(Update) ~= "table" then
+        logger.warn("一页壁纸: 无法加载更新模块", tostring(Update))
+        update_message(gettext("无法加载更新模块"))
+        return
+    end
     local paths = Update.paths(self.path)
     if not paths or type(self.version) ~= "string" then
         update_message(gettext("无法确定插件的安装目录或版本"))
@@ -1163,6 +1222,17 @@ function OnePage:_diagnostics()
         lines[#lines + 1] = gettext("今日图片: 未下载")
     end
     lines[#lines + 1] = gettext("最近状态: ") .. tostring(self._last_status or "-")
+    local cooldown_reason, cooldown_until
+    if is_http404_cooling(today_str) then
+        cooldown_reason, cooldown_until = gettext("今日图未发布"), http404_cooldown_until
+    elseif is_hard_cooling(today_str) then
+        cooldown_reason, cooldown_until = gettext("接口不可用"), hard_cooldown_until
+    end
+    if cooldown_reason then
+        lines[#lines + 1] = gettext("冷却: ") .. cooldown_reason
+            .. gettext("，剩余 ") .. tostring(math.ceil((cooldown_until - os.time()) / 60))
+            .. gettext(" 分钟")
+    end
     lines[#lines + 1] = gettext("网络: ") .. (is_network_available() and gettext("已连接") or gettext("未连接"))
     if G_reader_settings then
         lines[#lines + 1] = gettext("屏保类型: ") .. tostring(G_reader_settings:readSetting("screensaver_type"))
