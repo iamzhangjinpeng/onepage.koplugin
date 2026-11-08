@@ -19,6 +19,12 @@ scripts/deploy_usb.sh /Volumes/Kindle --fresh   # 拷代码 + 清空 onepage 缓
 scripts/collect_logs.sh /Volumes/Kindle         # 取 crash.log、缓存 PNG、目录清单
 ```
 
+`--fresh` 只做一件事：删掉 `koreader/screenshots/onepage/` 这一个目录（当日 jpg、同名 json、`wallpaper/` 下所有渲染 PNG、`display/wallpaper.png`），让下次启动像全新安装一样重新下载和渲染。KOReader 设置、别的插件一概不动。
+
+- **该用**：改了版式常量、字号、配色、缓存键；测占位图；测首装；怀疑 PNG 损坏。
+- **别用**：只改网络/调度/文案时没必要；**离线时更别用**——缓存清空后没网可下载，屏保只剩占位图。
+- 不带 `--fresh` 时只替换插件代码、保留缓存，所以改了版式又忘了加 `--fresh`，旧 PNG 会直接命中缓存，新代码根本不跑，看起来像"改了没效果"。
+
 USB 的时机：Kindle 停在主页（KOReader 已退出）时插线才会挂载成 U 盘；KOReader 正在运行时用「工具 → USB 存储模式」交还分区。
 
 ## 1. 五分钟冒烟测试
