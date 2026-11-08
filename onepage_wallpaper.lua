@@ -23,7 +23,9 @@ local util = require("util")
 local Layout = dofile((debug.getinfo(1, "S").source:match("^@(.*/)") or "./")
     .. "onepage_layout.lua")
 
-local Wallpaper = { MAX_JPEG_BYTES = 4 * 1024 * 1024, CACHE_VERSION = 1 }
+-- Bumped whenever the drawn pixels change without the layout geometry moving,
+-- so an old PNG on the device is never mistaken for the new render.
+local Wallpaper = { MAX_JPEG_BYTES = 4 * 1024 * 1024, CACHE_VERSION = 2 }
 -- The 1080px thumbnail is ~0.78 MP, but the CDN sometimes ignores the
 -- imageMogr2 parameters and returns the original 2559x1706 (4.37 MP).
 -- Rejecting that would mean "never renders a wallpaper again", so the pixel
@@ -259,9 +261,6 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     local info, date = C.info, C.date
     panel:paintRect(info.x - ox, info.y - oy, info.w, info.h, color(colors.info))
     panel:paintRect(date.x - ox, date.y - oy, date.w, date.h, color(colors.date))
-    if L.contrast == "high" then
-        panel:paintRect(date.x - ox, date.y - oy, 1, date.h, color(colors.rule))
-    end
 
     local pad = L.padding
     if meta and type(meta.quote) == "string" then
@@ -285,6 +284,14 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     paint_text(vol_text, vol_box, L.fonts.vol, L.fonts.vol, date_color, date_bg, "center", panel, "center")
     paint_text(day_text, day_box, L.fonts.day, round(L.fonts.day * 0.7), date_color, date_bg, "center", panel, "center")
     paint_text(month_text, month_box, L.fonts.month, L.fonts.month, date_color, date_bg, "center", panel, "center")
+
+    -- The separator has to be painted last: each TextBoxWidget fills its own
+    -- rectangle with the background colour, which used to erase the middle of
+    -- this line wherever the big day digits sat. Two pixels wide because a
+    -- single-pixel grey dithers into a broken dash on a 16-level panel.
+    if L.contrast == "high" then
+        panel:paintRect(date.x - ox, date.y - oy, 2, date.h, color(colors.rule))
+    end
 end
 
 local function render(source, target, width, height, style, contrast)

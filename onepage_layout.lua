@@ -32,7 +32,7 @@ local PALETTES = {
     classic = { canvas = 0xEE, card = 0xFF, cat = 0x4A, cat_text = 0xFF,
         info = 0xD9, date = 0xFA, text = 0x1A, rule = 0xC0 },
     high    = { canvas = 0xE8, card = 0xFF, cat = 0x22, cat_text = 0xFF,
-        info = 0xFF, date = 0xFF, text = 0x00, rule = 0xBB },
+        info = 0xFF, date = 0xFF, text = 0x00, rule = 0x99 },
 }
 
 -- Content layout inside an arbitrary rectangle. The ONE card divides its
