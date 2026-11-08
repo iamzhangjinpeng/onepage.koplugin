@@ -36,5 +36,15 @@ rm -f "$archive_path"
 )
 unzip -tq "$archive_path"
 
+size="$(wc -c < "$archive_path" | tr -d ' ')"
+digest="$(shasum -a 256 "$archive_path" | cut -d' ' -f1)"
+
 echo "version=$version"
 echo "archive=$archive_path"
+echo "size=$size"
+
+# The release asset must report exactly this digest: onepage_update.check
+# compares it against the file it downloads and refuses anything else, so a
+# stale zip means "安装包校验失败" on every device.
+echo "sha256=$digest"
+echo "digest=sha256:$digest"
