@@ -46,12 +46,36 @@ esac
 # Only the files the plugin actually loads; tests/ and scripts/ stay on the host.
 # COPYFILE_DISABLE stops macOS from writing "._name" AppleDouble files onto the
 # FAT volume; the find below is a belt-and-braces cleanup for older copies.
-rm -rf "$dest"
-mkdir -p "$dest"
+#
+# Copy into a staging directory and verify it before touching the installed
+# copy. The old "rm -rf $dest; cp ..." order meant a USB disconnect (or a
+# blocked rm) between the two steps left the device with no plugin at all.
+staging="$plugins_dir/onepage.koplugin.new"
+rm -rf "$staging"
+mkdir -p "$staging"
 COPYFILE_DISABLE=1 cp "$repo_dir"/_meta.lua "$repo_dir"/main.lua "$repo_dir"/onepage_*.lua \
-    "$repo_dir"/README.md "$dest/"
-COPYFILE_DISABLE=1 cp -R "$repo_dir/docs" "$dest/"
-find "$dest" -name '._*' -delete
+    "$repo_dir"/README.md "$staging/"
+COPYFILE_DISABLE=1 cp -R "$repo_dir/docs" "$staging/"
+find "$staging" -name '._*' -delete 2>/dev/null || true
+
+for src in "$repo_dir"/_meta.lua "$repo_dir"/main.lua "$repo_dir"/onepage_*.lua "$repo_dir"/README.md; do
+    name="$(basename "$src")"
+    want="$(shasum -a 256 "$src" | cut -d' ' -f1)"
+    got="$(shasum -a 256 "$staging/$name" 2>/dev/null | cut -d' ' -f1)"
+    if [[ "$want" != "$got" ]]; then
+        echo "error: $name did not survive the copy — installed copy left untouched" >&2
+        rm -rf "$staging"
+        exit 1
+    fi
+done
+if [[ ! -f "$staging/docs/field-test.md" ]]; then
+    echo "error: docs did not survive the copy — installed copy left untouched" >&2
+    rm -rf "$staging"
+    exit 1
+fi
+
+rm -rf "$dest"
+mv "$staging" "$dest"
 
 if [[ "$fresh" == "--fresh" ]]; then
     cache="$mount/koreader/screenshots/onepage"
@@ -66,6 +90,10 @@ if [[ "$fresh" == "--fresh" ]]; then
 fi
 
 sync
+if [[ ! -f "$dest/main.lua" ]]; then
+    echo "error: $dest/main.lua is missing after the swap — the volume went away mid-deploy, redeploy before starting KOReader" >&2
+    exit 1
+fi
 echo "deployed to $dest"
-find "$dest" -maxdepth 1 -type f | sort | sed 's|^|  |'
+find "$dest" -maxdepth 1 -type f 2>/dev/null | sort | sed 's|^|  |' || true
 echo "next: eject, then 完全退出 KOReader 并重新打开"
