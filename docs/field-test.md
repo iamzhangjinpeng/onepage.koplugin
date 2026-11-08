@@ -97,8 +97,19 @@ USB 的时机：Kindle 停在主页（KOReader 已退出）时插线才会挂载
 
 ### 9. 在线更新
 
-需要先有一个 GitHub Release（当前 `dist/` 还没上传，这一项先跳过）。
-**通过**：菜单 → 检查插件更新 → 提示新版本 → 下载安装 → 重启后版本号变化，`onepage.koplugin.previous` 备份在首次成功出图后被清掉。
+前置：仓库已发布 v0.1.1。三项必须精确——tag 带 `v`（`v0.1.1`，不是 `0.1.1`）、asset 文件名正好是 `onepage.koplugin-v0.1.1.zip`、不勾 drafts / prerelease。设备上仍是 0.1.0。
+
+菜单 → 检查插件更新。
+**通过**：弹出「发现一页壁纸新版本 0.1.1 / 当前版本 0.1.0」和发布说明；点「下载安装」后提示重启；重启后 `_meta.lua` 里是 `0.1.1`；`plugins/onepage.koplugin.previous/` 在下次成功出图后被删掉；全程 `crash.log` 无 traceback。
+
+失败时按提示串定位：
+
+| 提示 | 原因 |
+| --- | --- |
+| 无法验证发布信息 | JSON 结构不符：tag 没带 `v`、tag 不是 `x.y.z`、勾了 drafts/prerelease、asset 缺 `digest` 或 `url` |
+| 正式版缺少安装 ZIP | asset 名或 `browser_download_url` 对不上（macOS 下载重名会变成 `-1.zip`） |
+| 安装包校验失败 | 上传的 zip 与 API 报的 digest 不一致，通常是重打包后忘了重传 |
+| 替换失败，旧版已保留 | `os.rename` 失败，多半是上一轮的 `.previous` 没清干净 |
 
 ### 10. 内存
 
