@@ -7,6 +7,7 @@ No KOReader runtime and no network are required. Renderer and UI code are
 syntax-checked only; their behaviour needs a real Kindle.
 """
 
+import json
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,10 @@ class LuaTestCase(unittest.TestCase):
             'function(m, L) local a, b = m.validate(L); return a, b or "" end')
         cls.wrap_fetch = cls.lua.eval(
             'function(f) return function(id) return f(id) end end')
+        # lupa collapses a Lua `nil` return into a single None, so wrap the
+        # two-value result and normalise a nil error to "".
+        cls.pick = cls.lua.eval(
+            'function(m, ...) local a, b = m.pick_today(...); return a, b or "" end')
 
     def detail(self, **overrides):
         data = dict(TODAY_DETAIL)
@@ -84,6 +89,28 @@ class TestApiParsing(LuaTestCase):
             self.api.normalize_image_url("https://example.com/a.jpg", 1080),
             "https://example.com/a.jpg",
         )
+
+    def test_image_host_whitelist(self):
+        self.assertTrue(self.api.is_allowed_image_url("http://image.wufazhuce.com/abc"))
+        self.assertTrue(self.api.is_allowed_image_url("https://image.wufazhuce.com:443/abc"))
+        self.assertFalse(self.api.is_allowed_image_url("http://cdn.wufazhuce.com/abc"))
+        self.assertFalse(self.api.is_allowed_image_url(
+            "http://image.wufazhuce.com.evil.example/abc"))
+        self.assertFalse(self.api.is_allowed_image_url(
+            "http://image.wufazhuce.com@evil.example/abc"))
+        self.assertFalse(self.api.is_allowed_image_url("javascript:alert(1)"))
+
+    def test_parse_detail_rejects_non_cdn_image_host(self):
+        """The v3 endpoint is plain HTTP; a tampered hp_img_url must not be fetched."""
+        meta = self.api.parse_detail(self.detail(
+            hp_img_url="https://evil.example/a.jpg", hp_img_original_url=""))
+        self.assertIsNone(meta)
+
+    def test_json_encode_fallback_is_valid_json(self):
+        """%q would emit Lua \\ddd escapes for UTF-8, which JSON cannot parse."""
+        source = {"quote": "中文 \"引号\"\n第二行", "vol": "5146"}
+        encoded = self.api.json_encode(self.lua.table_from(source))
+        self.assertEqual(json.loads(encoded), source)
 
     def test_iso_to_compact(self):
         self.assertEqual(self.api.iso_to_compact("2026-11-08 06:00:00"), "20261108")
@@ -165,6 +192,39 @@ class TestPickToday(LuaTestCase):
         self.assertEqual(meta["vol"], "9999")
         self.assertEqual(calls[:3], ["5283", "5307", "5303"])
 
+    def test_all_probes_failed_is_network_error(self):
+        """A flaky network must not look like 'today is not published'."""
+        fetch = self.wrap_fetch(lambda _: None)
+        meta, err = self.pick(self.api, self.ids(), fetch, "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "network_error")
+
+    def test_probe_error_is_propagated(self):
+        fetch = self.lua.eval('function() return function() return nil, "http_500" end end')()
+        meta, err = self.pick(self.api, self.ids(), fetch, "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "http_500")
+
+    def test_partial_probe_failure_still_means_not_published(self):
+        """One answered detail is enough to conclude the date is not published."""
+        calls = []
+
+        def fetch(hp_id):
+            calls.append(str(hp_id))
+            if str(hp_id) == "5283":
+                return None
+            return self.detail(hp_makettime="2026-11-07 06:00:00")
+
+        meta, err = self.pick(self.api, self.ids(), self.wrap_fetch(fetch), "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "")
+
+    def test_deadline_stops_probing(self):
+        fetch = self.wrap_fetch(lambda _: self.detail(hp_makettime="2026-11-01 06:00:00"))
+        meta, err = self.pick(self.api, self.ids(), fetch, "20261108", 10, 1)
+        self.assertIsNone(meta)
+        self.assertEqual(err, "timeout")
+
 
 class TestLayout(LuaTestCase):
     SCREENS = [(1072, 1448), (1080, 1080), (1448, 1072), (600, 800), (758, 1024)]
@@ -201,6 +261,21 @@ class TestLayout(LuaTestCase):
         L = self.layout.for_screen(1072, 1448, "fullscreen", "classic")
         self.assertIsNone(L["card"])
         self.assertEqual(L["colors"]["info"], 0xD9)
+
+    def test_footer_text_omits_missing_vol_and_author(self):
+        """Degraded metadata is {date=...}; it used to render the literal 'VOL.nil'."""
+        text = self.layout.footer_text(self.lua.table_from({"date": "20261108"}))
+        self.assertEqual(text, "2026.11.08")
+        self.assertNotIn("nil", text)
+
+    def test_footer_text_full(self):
+        meta = self.lua.table_from(
+            {"date": "20261108", "vol": "5146", "image_author": "张三"})
+        self.assertEqual(self.layout.footer_text(meta), "VOL.5146  ·  2026.11.08  ·  张三")
+
+    def test_footer_text_handles_non_table(self):
+        self.assertEqual(self.layout.footer_text(None), "")
+        self.assertEqual(self.layout.footer_text("x"), "")
 
     def test_row_inset_is_symmetric_and_monotonic(self):
         radius, height = 40, 1000

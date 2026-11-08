@@ -17,8 +17,6 @@ local UIManager       = require("ui/uimanager")
 local InfoMessage     = require("ui/widget/infomessage")
 local logger          = require("logger")
 local util            = require("util")
-local http            = require("socket.http")
-local socketutil      = require("socketutil")
 local ffiutil         = require("ffi/util")
 local time            = require("ui/time")
 local NetworkMgr      = require("ui/network/manager")
@@ -59,7 +57,10 @@ local CHECK_INTERVAL   = 5 * 60   -- 周期兜底检查（秒）
 local MAX_RETRIES      = 6        -- Wi-Fi 重连等待的最大轮数
 local RETRY_BASE       = 10       -- 退避基数（秒）
 local RETRY_MAX        = 120      -- 单次退避上限（秒）
-local HTTP_TIMEOUT     = 20       -- 下载总时限（秒），由父进程强制执行
+local HTTP_TIMEOUT     = 20       -- 单次请求超时（秒）
+-- One day's fetch is 1 idlist + up to 10 detail probes + 1 image, all serial.
+-- The 20s that is fine for a single request is far too tight for that chain.
+local DOWNLOAD_TIMEOUT = 60       -- 下载子进程总时限（秒），由父进程强制执行
 local UPDATE_TIMEOUT   = 60
 local WORKER_POLL_INTERVAL = 0.125
 local HTTP404_COOLDOWN = 2 * 3600 -- 今日图未发布 (404) 后的冷却（秒）
@@ -273,6 +274,8 @@ local function status_text(status)
     elseif status == "timeout" then return gettext("下载超时")
     elseif status == "file_too_large" then return gettext("图片超过下载大小上限")
     elseif status == "invalid_file" then return gettext("下载文件校验失败")
+    elseif status == "invalid_host" then return gettext("图片地址不在受信域名内")
+    elseif status == "redirect_error" then return gettext("图片跳转地址不受信任")
     elseif status == "rename_error" then return gettext("文件替换失败")
     elseif status == "write_error" then return gettext("元数据写入失败")
     elseif status == "no_today" then return gettext("今日内容尚未发布")
@@ -469,6 +472,9 @@ local function download_image(year, month, day, date_str, is_active, callback)
             image_tmp = tmp,
             meta_tmp = meta_tmp,
             timeout = HTTP_TIMEOUT,
+            -- Stop probing before the parent's hard kill, so the child can still
+            -- clean up its temp files and report "timeout" over the pipe.
+            deadline = os.time() + DOWNLOAD_TIMEOUT - 8,
         })
         if not called then
             logger.warn("一页壁纸: 接口请求异常", tostring(status))
@@ -513,7 +519,7 @@ local function download_image(year, month, day, date_str, is_active, callback)
             os.remove(tmp)
             finish(false, "network_error")
         end
-    end)
+    end, DOWNLOAD_TIMEOUT)
 end
 
 ----------------------------------------------------------------------
@@ -667,10 +673,9 @@ end
 
 function OnePage:_select_wallpaper_style(style)
     if self._stopped or not G_reader_settings then return end
-    if wallpaper_style() ~= style then
-        G_reader_settings:saveSetting(SETTING_WALLPAPER_STYLE, style)
-        G_reader_settings:flush()
-    end
+    if wallpaper_style() == style then return end
+    G_reader_settings:saveSetting(SETTING_WALLPAPER_STYLE, style)
+    G_reader_settings:flush()
     local available, failure = self:_refresh_wallpaper()
     local message
     if failure then
@@ -774,6 +779,7 @@ function OnePage:deletePluginSettings()
     self:_restore_screensaver_settings(true)
     G_reader_settings:delSetting(SETTING_AUTO_SCREENSAVER)
     G_reader_settings:delSetting(SETTING_WALLPAPER_STYLE)
+    G_reader_settings:delSetting(SETTING_CONTRAST)
     G_reader_settings:delSetting("onepage_last_date")
     G_reader_settings:flush()
 end
@@ -1151,7 +1157,6 @@ function OnePage:_diagnostics()
         lines[#lines + 1] = gettext("今日图片: 未下载")
     end
     lines[#lines + 1] = gettext("最近状态: ") .. tostring(self._last_status or "-")
-    lines[#lines + 1] = gettext("壁纸类型: ") .. (wallpaper_style() == "card" and gettext("白底圆角卡") or gettext("全屏"))
     lines[#lines + 1] = gettext("网络: ") .. (is_network_available() and gettext("已连接") or gettext("未连接"))
     if G_reader_settings then
         lines[#lines + 1] = gettext("屏保类型: ") .. tostring(G_reader_settings:readSetting("screensaver_type"))
@@ -1162,7 +1167,6 @@ function OnePage:_diagnostics()
     lines[#lines + 1] = gettext("壁纸: ")
         .. (wallpaper_style() == "card" and gettext("白底圆角卡") or gettext("全屏"))
         .. " / " .. (wallpaper_contrast() == "high" and gettext("高对比白") or gettext("经典灰"))
-    local _, today_str = get_today_info()
     lines[#lines + 1] = gettext("今日文案: ")
         .. (file_exists(SAVE_DIR .. today_str .. ".json") and gettext("已缓存") or gettext("未缓存"))
     return table.concat(lines, "\n")

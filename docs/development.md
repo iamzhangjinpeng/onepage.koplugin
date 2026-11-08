@@ -22,7 +22,7 @@
       idlist/0 → data[1]（校验 hp_makettime）
       → hp/detail/{id} → YYYYMMDD.json.tmp
       → 图片（1080x 缩略）→ YYYYMMDD.jpg.tmp
-  → 父进程校验 JPEG（头尾 + 解码）→ rename 两个临时文件
+  → 子进程解码校验（Wallpaper.validate_source）→ 父进程头尾校验 → rename 两个临时文件
   → onepage_wallpaper.prepare()
       读 YYYYMMDD.json
       → Layout.for_screen(W, H, style, contrast)
@@ -59,7 +59,7 @@ end
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | M0 | 建仓、接口快照、文档 | 完成 |
-| M1 | 数据层 + 版式计算 + 离线单测 | 完成（19 项） |
+| M1 | 数据层 + 版式计算 + 离线单测 | 完成（29 项） |
 | M2 | 两种样式渲染（全屏 / 白底圆角卡） | 完成（待真机验证） |
 | M3 | 菜单、调度、后台下载、屏保接管 | 完成（移植自单向历） |
 | M4 | 降级链、诊断、在线更新 | 更新器已移植；PC HTML 兜底未实现 |
@@ -77,10 +77,13 @@ end
 8. 长文案（>3 行）与英文文案，确认自动缩字号、省略号正常，无越界。
 9. 在线更新：从 Release 下载 zip，校验 SHA-256，替换后重启，备份目录清理正常。
 10. 内存观察：Kindle 上渲染 1072×1448 不崩溃（缩略图 75 KB，解码后及时 free）。
+11. 把一个能通过头尾校验但无法解码的 JPEG 改名成 `YYYYMMDD.jpg` 放进缓存目录，确认插件识别为坏图并重新下载，而不是一直提示「今日壁纸已存在」。
 
 ## 已知风险
 
 - v3 接口无 SLA，失效后需要补 VOL 锚点反查或 PC HTML 兜底解析器。
+- 图片域名白名单固定为 `image.wufazhuce.com`，CDN 迁移域名需要随版本更新。
+- 一次抓取最多 1 次 idlist + 10 次 detail + 1 次图片，全部串行；总预算 60 秒，超出返回 `timeout` 并退避重试。
 - `TextBoxWidget` / `ditherblitFrom` 的行为在不同 KOReader 版本可能略有差异，需实机确认。
 - 横图裁成竖屏时主体可能被切（今日照片的招牌在右侧，center-cover 实测仍完整）；后续可加焦点偏移设置。
 - 圆角卡在横屏设备上按竖屏尺寸生成（沿用单向历策略）。

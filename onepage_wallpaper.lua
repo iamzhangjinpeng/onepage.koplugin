@@ -161,7 +161,7 @@ end
 -- TextBoxWidget allocates a pixel buffer on construction, so bound its height
 -- on every size trial. Font:getFace scales its argument by the screen DPI, so
 -- convert the intended pixel size back first (yiyan.koplugin).
-local function text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignment, widgets)
+local function text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignment)
     local TextBoxWidget = require("ui/widget/textboxwidget")
     local Font = require("ui/font")
     local Screen = require("device").screen
@@ -183,7 +183,6 @@ local function text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignmen
             bgcolor = bgcolor,
         }
         if current <= min_size or (not widget.line_with_ellipsis and widget:getSize().h <= box.h) then
-            widgets[#widgets + 1] = widget
             return widget
         end
         widget:free()
@@ -191,15 +190,20 @@ local function text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignmen
     end
 end
 
-local function paint_text(text, box, size, min_size, fgcolor, bgcolor, alignment, bb, widgets)
+-- Paint and release immediately: a 1072x1448 wallpaper holds seven of these,
+-- and keeping every widget's pixel buffer alive until the end of render() was
+-- several megabytes of avoidable peak memory.
+local function paint_text(text, box, size, min_size, fgcolor, bgcolor, alignment, bb)
     if not text or text == "" then return end
-    local widget = text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignment, widgets)
-    widget:paintTo(bb, box.x, box.y)
+    local widget = text_in_box(text, box, size, min_size, fgcolor, bgcolor, alignment)
+    local painted = pcall(widget.paintTo, widget, bb, box.x, box.y)
+    widget:free()
+    if not painted then error("Cannot paint text") end
 end
 
 -- Paint the ONE card into `panel`. ox/oy is the panel origin in the layout's
 -- coordinate space (the card's top-left for the card style, 0/0 for fullscreen).
-local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage, widgets, scaled_photo)
+local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
     local colors = L.colors
     local ox, oy = L.card and L.card.x or 0, L.card and L.card.y or 0
     local C = L.content
@@ -217,16 +221,17 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage, 
     local sw, sh = math.max(1, round(iw * scale)), math.max(1, round(ih * scale))
     local scaled = RenderImage:scaleBlitBuffer(original, sw, sh, false)
     if not scaled then error("Cannot scale the daily image") end
-    scaled_photo[1] = scaled
     local sx, sy = math.floor((sw - pw) / 2), math.floor((sh - ph) / 2)
-    panel:blitFrom(scaled, photo.x - ox, photo.y - oy, sx, sy, pw, ph)
+    local blitted = pcall(panel.blitFrom, panel, scaled, photo.x - ox, photo.y - oy, sx, sy, pw, ph)
+    scaled:free()
+    if not blitted then error("Cannot place the daily image") end
 
     -- Category band.
     local cat = C.cat
     panel:paintRect(cat.x - ox, cat.y - oy, cat.w, cat.h, color(colors.cat))
     paint_text((meta and meta.category) or "摄影", local_box(cat),
         L.fonts.category, L.fonts.category, color(colors.cat_text), color(colors.cat),
-        "center", panel, widgets)
+        "center", panel)
 
     -- Quote panel and date column.
     local info, date = C.info, C.date
@@ -240,11 +245,11 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage, 
     if meta and type(meta.quote) == "string" then
         paint_text(meta.quote, local_box(info, pad, pad, -2 * pad, -2 * pad),
             L.fonts.quote, L.fonts.quote_min, color(colors.text), color(colors.info),
-            "left", panel, widgets)
+            "left", panel)
     end
 
     local date_str = tostring((meta and meta.date) or "")
-    local vol_text = (meta and meta.vol ~= "" and meta.vol) and ("VOL." .. tostring(meta.vol)) or ""
+    local vol_text = (meta and meta.vol and meta.vol ~= "") and ("VOL." .. tostring(meta.vol)) or ""
     local day_text = date_str:sub(7, 8)
     local month_text = Layout.month_name(tonumber(date_str:sub(5, 6)) or 1) .. " " .. date_str:sub(1, 4)
     local date_color, date_bg = color(colors.text), color(colors.date)
@@ -255,22 +260,25 @@ local function paint_content(panel, L, meta, original, Blitbuffer, RenderImage, 
     day_box.h = round(date.h * 0.45)
     local month_box = local_box(date, dpad, round(date.h * 0.78), -2 * dpad, 0)
     month_box.h = round(date.h * 0.18)
-    paint_text(vol_text, vol_box, L.fonts.vol, L.fonts.vol, date_color, date_bg, "center", panel, widgets)
-    paint_text(day_text, day_box, L.fonts.day, round(L.fonts.day * 0.7), date_color, date_bg, "center", panel, widgets)
-    paint_text(month_text, month_box, L.fonts.month, L.fonts.month, date_color, date_bg, "center", panel, widgets)
+    paint_text(vol_text, vol_box, L.fonts.vol, L.fonts.vol, date_color, date_bg, "center", panel)
+    paint_text(day_text, day_box, L.fonts.day, round(L.fonts.day * 0.7), date_color, date_bg, "center", panel)
+    paint_text(month_text, month_box, L.fonts.month, L.fonts.month, date_color, date_bg, "center", panel)
 end
 
 local function render(source, target, width, height, style, contrast)
     local original, panel, canvas, eink
-    local widgets = {}
-    local scaled_photo = {}
+    local invalid_source
     local ok, err = pcall(function()
         local ffi_ok, Blitbuffer = pcall(require, "ffi/blitbuffer")
         if not ffi_ok then error("Blitbuffer unavailable") end
         local RenderImage = require("ui/renderimage")
         local decode_error
         original, decode_error = decode_source(RenderImage, source)
-        if not original then error(decode_error) end
+        if not original then
+            -- Tells main.lua to re-download instead of trusting today's JPEG.
+            invalid_source = true
+            error(decode_error or "Cannot decode the daily image", 0)
+        end
 
         local L = Layout.for_screen(width, height, style, contrast)
         local valid, why = Layout.validate(L)
@@ -283,7 +291,7 @@ local function render(source, target, width, height, style, contrast)
         local panel_h = L.card and L.card.h or height
         panel = Blitbuffer.new(panel_w, panel_h, Blitbuffer.TYPE_BB8)
         if L.card then panel:paintRect(0, 0, panel_w, panel_h, color(colors.card)) end
-        paint_content(panel, L, meta, original, Blitbuffer, RenderImage, widgets, scaled_photo)
+        paint_content(panel, L, meta, original, Blitbuffer, RenderImage)
 
         if L.card then
             canvas = Blitbuffer.new(width, height, Blitbuffer.TYPE_BB8)
@@ -297,17 +305,10 @@ local function render(source, target, width, height, style, contrast)
                     canvas:blitFrom(panel, c.x + left, c.y + row, left, row, right - left, 1)
                 end
             end
-            local footer_bits = {}
-            if meta.vol ~= "" then footer_bits[#footer_bits + 1] = "VOL." .. tostring(meta.vol) end
-            if meta.date and meta.date ~= "" then
-                local d = tostring(meta.date)
-                footer_bits[#footer_bits + 1] = d:sub(1, 4) .. "." .. d:sub(5, 6) .. "." .. d:sub(7, 8)
-            end
-            if meta.image_author then footer_bits[#footer_bits + 1] = tostring(meta.image_author) end
             paint_text("ONE · 一个", L.header, L.fonts.header, L.fonts.header,
-                color(colors.text), color(colors.canvas), "center", canvas, widgets)
-            paint_text(table.concat(footer_bits, "  ·  "), L.footer, L.fonts.footer, L.fonts.footer,
-                color(colors.text), color(colors.canvas), "center", canvas, widgets)
+                color(colors.text), color(colors.canvas), "center", canvas)
+            paint_text(Layout.footer_text(meta), L.footer, L.fonts.footer, L.fonts.footer,
+                color(colors.text), color(colors.canvas), "center", canvas)
         else
             canvas = panel
             panel = nil
@@ -321,17 +322,15 @@ local function render(source, target, width, height, style, contrast)
         return true
     end)
 
-    for _, widget in ipairs(widgets) do widget:free() end
-    if scaled_photo[1] then scaled_photo[1]:free() end
     if panel then panel:free() end
     if canvas then canvas:free() end
     if eink then eink:free() end
     if original then original:free() end
     if not ok then
         logger.warn("一页壁纸: 渲染失败", tostring(err))
-        return false, tostring(err)
+        return false, tostring(err), invalid_source
     end
-    return true
+    return true, nil, invalid_source
 end
 
 -- ---------------------------------------------------------------------------
@@ -479,7 +478,7 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
     local previous = generated_images(dir)
     local tmp = dir .. "wallpaper.png.tmp"
     os.remove(tmp)
-    local failure
+    local failure, invalid_source
     if source then
         local attrs = lfs.attributes(source)
         local date = source:match("(%d%d%d%d%d%d%d%d)%.jpg$")
@@ -495,7 +494,7 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
             if not ready then
                 local made, mkdir_err = util.makePath(dir)
                 if made then
-                    ready, failure = render(source, tmp, width, height, style, contrast)
+                    ready, failure, invalid_source = render(source, tmp, width, height, style, contrast)
                     if ready then
                         ready, failure = os.rename(tmp, target)
                         if ready then
@@ -513,7 +512,7 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
                 local available, publish_error, published = publish_wallpaper(candidate, display_dir,
                     rendered and candidate == target)
                 if rendered and published then prune_replaced_cache(previous, target, date) end
-                return available, publish_error
+                return available, publish_error, invalid_source
             end
         end
         failure = failure or "Cannot prepare the wallpaper"
@@ -521,7 +520,7 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
     end
     local candidate, cache_error = find_cached_wallpaper(previous)
     local available, publish_error = publish_wallpaper(candidate, display_dir)
-    return available, failure or publish_error or cache_error
+    return available, failure or publish_error or cache_error, invalid_source
 end
 
 return Wallpaper

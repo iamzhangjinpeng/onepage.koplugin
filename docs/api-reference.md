@@ -64,6 +64,8 @@ GET http://image.wufazhuce.com/Fl93rM1GcYl_kdoacl-qOqTiMqMY?imageMogr2/thumbnail
 
 图片按 center-cover 裁切到竖屏区域，与 ONE App 观感一致。
 
+**下载白名单**：只接受 `image.wufazhuce.com`。`hp_img_url` 来自明文 HTTP，可能被中间人改写；`parse_detail` 与 `write_image` 各校验一次，3xx 重定向也只允许同域名跳一次，否则返回 `invalid_host` / `redirect_error`。
+
 ## 本地元数据
 
 图片旁保存 `YYYYMMDD.json`（`onepage_api.lua` 用 `dkjson.encode` 写）：
@@ -88,13 +90,18 @@ GET http://image.wufazhuce.com/Fl93rM1GcYl_kdoacl-qOqTiMqMY?imageMogr2/thumbnail
 
 | 状态 | 含义 | 主进程行为 |
 | --- | --- | --- |
-| `no_today` | 今日未发布 / 日期全不匹配 | 映射为 `http_404`，冷却 2 小时，保留上一张壁纸 |
+| `no_today` | **至少一次** detail 探测拿到了响应，但日期都不匹配（真未发布） | 映射为 `http_404`，冷却 2 小时，保留上一张壁纸 |
 | `http_404` | HTTP 404 | 同上 |
-| `network_error` / `http_*` | 网络或服务端错误 | 指数退避重试，最多 6 轮 |
+| `network_error` / `http_*` | 一次可用响应都没拿到（全部探测失败） | 指数退避重试，最多 6 轮，**不进入 404 冷却** |
+| `timeout` | 探测途中的总时限耗尽（默认 60 秒任务预算） | 退避重试 |
+| `invalid_host` | 图片 URL 不在 `image.wufazhuce.com` 白名单 | 拒绝下载，退避重试 |
+| `redirect_error` | 图片 3xx 跳到非白名单域名，或跳转超过一次 | 拒绝下载，退避重试 |
 | `invalid_file` | JPEG 头尾或解码校验失败 | 删除临时文件，保留上一张壁纸 |
 | `file_too_large` | 超过 4 MiB | 同上 |
 | `decode` / `nojson` | JSON 解析失败 | 退避重试 |
 | `write_error` | 元数据写入失败 | 退避重试 |
+
+`no_today` 与 `network_error` 必须区分：前者说明服务端明确没有今天的内容，可以安静等 2 小时；后者只是这一次没连上，若误判成 `no_today`，弱网下会整天不出图。
 
 ## 降级链（当前实现 / 后续）
 

@@ -29,7 +29,12 @@ def main():
     ids = get("/api/hp/idlist/0").get("data") or []
     if not ids:
         raise SystemExit("idlist/0 returned no ids")
-    print("idlist[0..4]:", ids[:5], " max(id):", max(int(i) for i in ids))
+    print("idlist[0..4]:", ids[:5])
+    # Printed for comparison only: numeric ids are pre-allocated and out of
+    # order, so max(id) is NOT today's entry. data[0] is.
+    numeric = [int(i) for i in ids if str(i).isdigit()]
+    if numeric:
+        print("max(id) (reference only, NOT today):", max(numeric))
 
     beijing_today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
     today = None

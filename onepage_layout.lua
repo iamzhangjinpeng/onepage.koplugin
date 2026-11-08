@@ -111,6 +111,23 @@ function Layout.row_inset(y_in_card, card_h, radius_x, radius_y)
     return round(radius_x * (1 - math.sqrt(1 - arc * arc)))
 end
 
+-- Footer line of the card style. Kept here (pure Lua, no KOReader) so the
+-- degraded "photo only" metadata path is unit tested: a missing `vol` used to
+-- render as the literal "VOL.nil".
+function Layout.footer_text(meta)
+    if type(meta) ~= "table" then return "" end
+    local bits = {}
+    local vol = meta.vol
+    if vol ~= nil and tostring(vol) ~= "" then bits[#bits + 1] = "VOL." .. tostring(vol) end
+    local date = type(meta.date) == "string" and meta.date or ""
+    if #date == 8 then
+        bits[#bits + 1] = date:sub(1, 4) .. "." .. date:sub(5, 6) .. "." .. date:sub(7, 8)
+    end
+    local author = meta.image_author
+    if author ~= nil and tostring(author) ~= "" then bits[#bits + 1] = tostring(author) end
+    return table.concat(bits, "  ·  ")
+end
+
 -- Invariants used by the tests and by the renderer before allocating buffers.
 function Layout.validate(L)
     if not L or not L.content then return false, "missing layout" end

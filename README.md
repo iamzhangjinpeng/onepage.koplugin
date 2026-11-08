@@ -44,7 +44,9 @@ GET http://v3.wufazhuce.com:8000/api/hp/detail/{id}?...
 GET http://image.wufazhuce.com/...?imageMogr2/thumbnail/1080x/format/jpg
 ```
 
-图片经 CDN 缩略到 1080 宽（实测约 75 KB，原图约 774 KB），避免 Kindle 解码大图时内存吃紧。全部请求在后台子进程执行，不阻塞阅读界面。
+图片经 CDN 缩略到 1080 宽（实测约 75 KB，原图约 774 KB），避免 Kindle 解码大图时内存吃紧。全部请求在后台子进程执行，单次任务总时限 60 秒，不阻塞阅读界面。
+
+图片只允许从 `image.wufazhuce.com` 下载。接口是明文 HTTP，若响应被篡改、把 `hp_img_url` 指向别的域名，插件会拒绝下载而不是照单全收；3xx 重定向也只允许同域名跳一次。
 
 本地文件：
 
@@ -62,6 +64,7 @@ GET http://image.wufazhuce.com/...?imageMogr2/thumbnail/1080x/format/jpg
 ## 已知限制
 
 - 依赖非官方 v3 接口（`http://v3.wufazhuce.com:8000`，明文 HTTP，无鉴权、无 SLA）。接口变更或下线时，插件会保留最近一张可用壁纸；PC HTML 兜底解析器留待后续版本。
+- 图片域名白名单固定为 `image.wufazhuce.com`；CDN 若迁移域名，需要随版本更新。
 - 首版只做壁纸，不提供文章/问答阅读与历史任意日期回看（那是 one.koplugin 的职责）。
 - 中文渲染依赖 KOReader 内置 `cfont` 字体与 `TextBoxWidget`；字形缺失时自动缩字号、超长句省略，仍失败则退纯照片。
 - Kindle 实机显示需设备安装验证，桌面离线单测只覆盖纯逻辑。
