@@ -219,6 +219,14 @@ class TestPickToday(LuaTestCase):
         self.assertIsNone(meta)
         self.assertEqual(err, "")
 
+    def test_all_probes_on_unknown_host_is_not_no_today(self):
+        """A CDN migration must surface as invalid_host, not as a 2h 404 cooldown."""
+        fetch = self.wrap_fetch(lambda _: self.detail(
+            hp_img_url="https://evil.example/a.jpg", hp_img_original_url=""))
+        meta, err = self.pick(self.api, self.ids(), fetch, "20261108")
+        self.assertIsNone(meta)
+        self.assertEqual(err, "invalid_host")
+
     def test_deadline_stops_probing(self):
         fetch = self.wrap_fetch(lambda _: self.detail(hp_makettime="2026-11-01 06:00:00"))
         meta, err = self.pick(self.api, self.ids(), fetch, "20261108", 10, 1)

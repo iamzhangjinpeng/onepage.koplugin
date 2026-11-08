@@ -133,7 +133,7 @@ retrying for two hours, so a flaky network must never look like "not published".
 function Api.pick_today(ids, fetch_detail, date_str, max_probes, deadline)
     if type(ids) ~= "table" or type(fetch_detail) ~= "function" then return nil, "bad_args" end
     local limit = math.min(max_probes or Api.MAX_ID_PROBES, #ids, Api.MAX_ID_PROBES)
-    local responded, last_error = 0, nil
+    local responded, rejected, last_error = 0, 0, nil
     for i = 1, limit do
         if deadline and os.time() >= deadline then return nil, "timeout" end
         local data, err = fetch_detail(ids[i])
@@ -141,12 +141,25 @@ function Api.pick_today(ids, fetch_detail, date_str, max_probes, deadline)
             responded = responded + 1
             local meta = Api.parse_detail(data)
             if meta and meta.date == date_str then return meta end
+            if not meta then
+                -- Detail answered but its image URL is off-whitelist. If every
+                -- answer looks like that, report it instead of pretending the
+                -- date is unpublished (which would silence the plugin for 2h).
+                local url = Api.normalize_image_url(
+                    data.hp_img_url or data.hp_img_original_url, 1080)
+                if url and not Api.is_allowed_image_url(url) then
+                    rejected = rejected + 1
+                end
+            end
         elseif err then
             last_error = err
         end
     end
     -- At least one detail parsed: the date really is not published yet.
-    if responded > 0 then return nil end
+    if responded > 0 then
+        if rejected == responded then return nil, "invalid_host" end
+        return nil
+    end
     return nil, last_error or "network_error"
 end
 
