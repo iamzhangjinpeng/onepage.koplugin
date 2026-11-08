@@ -55,6 +55,9 @@ local UTC_OFFSET = 8 * 3600
 
 local INIT_DELAY       = 8        -- 启动后首次检查延迟（秒）
 local RESUME_DELAY     = 2        -- 唤醒后检查延迟（秒）
+-- Rotating redraws the whole panel; rendering into the framebuffer while that
+-- is still in flight wastes an e-ink refresh and can land on the wrong bb.
+local ROTATE_DELAY     = 1.5      -- 转屏后重绘壁纸的延迟（秒）
 local CHECK_INTERVAL   = 5 * 60   -- 周期兜底检查（秒）
 local MAX_RETRIES      = 6        -- Wi-Fi 重连等待的最大轮数
 local RETRY_BASE       = 10       -- 退避基数（秒）
@@ -882,6 +885,21 @@ function OnePage:onResume()
     if self._stopped or active_instance ~= self or update_needs_restart then return end
     self._resume_at = os.time() + RESUME_DELAY
     self:_schedule_next_check()
+end
+
+-- KOReader rotates in software, so the framebuffer's width and height swap.
+-- Without this the 5-minute loop was the only thing that noticed: rotate, lock
+-- straight away, and the screensaver stretched the *portrait* PNG across a
+-- landscape panel. Re-render from the JPEG already on disk (no network) and
+-- let the rotation redraw land first.
+function OnePage:onSetRotationMode()
+    if self._stopped or self._busy or update_needs_restart then return end
+    UIManager:scheduleIn(ROTATE_DELAY, function()
+        if self._stopped or self._busy then return end
+        local _, _, today_path = get_today_info()
+        if not is_valid_jpeg(today_path) then return end
+        self:_refresh_wallpaper(today_path)
+    end)
 end
 
 -- Wi-Fi 是否开启（与“是否已拿到 IP”分开判断）

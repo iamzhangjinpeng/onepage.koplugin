@@ -653,6 +653,12 @@ function Wallpaper.prepare(dir, source, style, refresh, verify_cache, display_di
                 local available, publish_error, published = publish_wallpaper(candidate, display_dir,
                     rendered and candidate == target)
                 if rendered and published then prune_replaced_cache(previous, target, date) end
+                -- Renders are rare (the key carries the size, the style, the
+                -- contrast and the source fingerprint), and without this line a
+                -- field test cannot tell "re-rendered" from "never ran".
+                if rendered then
+                    logger.info("一页壁纸: 已重绘", width .. "x" .. height)
+                end
                 return available, publish_error, invalid_source
             end
         end
