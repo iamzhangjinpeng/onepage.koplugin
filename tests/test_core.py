@@ -8,6 +8,7 @@ syntax-checked only; their behaviour needs a real Kindle.
 """
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -274,6 +275,23 @@ class TestLayout(LuaTestCase):
         self.assertEqual(self.layout.contrast(None), "high")
         self.assertEqual(self.layout.month_name(11), "Nov")
         self.assertEqual(self.layout.month_name(1), "Jan")
+
+    def test_every_menu_style_is_known_to_the_layout(self):
+        """The menu list lives in main.lua and the whitelist in the layout module.
+
+        Adding an entry to one but not the other fails silently: the menu stores
+        the value, Layout.style() maps it to fullscreen, and the user's pick is
+        simply ignored. main.lua cannot be loaded offline, so read it as text.
+        """
+        source = (ROOT / "main.lua").read_text(encoding="utf-8")
+        # Entries also end with "}", so cut at the first line that is only "}".
+        block = source[source.index("local WALLPAPER_STYLES = {"):].split("\n}\n", 1)[0]
+        keys = re.findall(r'\{\s*"([a-z-]+)"\s*,\s*gettext', block)
+        self.assertGreaterEqual(len(keys), 3)
+        self.assertEqual(len(keys), len(set(keys)))
+        for key in keys:
+            with self.subTest(style=key):
+                self.assertEqual(self.layout.style(key), key)
 
     def test_layouts_are_valid_for_all_screens_styles_palettes(self):
         for width, height in self.SCREENS:
