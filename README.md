@@ -8,15 +8,26 @@
 
 | 全屏 | 白底圆角卡 | 满版圆角卡 |
 | --- | --- | --- |
-| <img src="img/wallpaper-fullscreen.jpg" width="248"> | <img src="img/wallpaper-card.jpg" width="248"> | <img src="img/wallpaper-poster-1.jpg" width="248"> |
 | 照片与文字铺满屏幕，还原 ONE App 的图文卡片 | 同一张卡片放进白色圆角卡，浅灰画布留白，卡外有「ONE · 一个」与期号/日期/摄影署名 | 与白底圆角卡同一张卡，但去掉卡内那圈白边：照片与文案块直接顶到卡边 |
 | 分区：照片 72.2% / 分类条 4.9% / 文案区 22.9%，日期块占宽 17.6% | 四角按圆弧逐行裁切，照片与文字面板一起变圆 | 同样逐行裁切，圆角直接切在照片上；照片比白底卡宽 7.9%，字号随几何一起放大 |
+
+<!-- strip-for-release:begin
+     本节连同标记一起在打包时删除：图片指向仓库 img/，安装 zip 里没有它。
+     GitHub 上正常显示。 -->
+
+## 效果
+
+| 全屏 | 白底圆角卡 | 满版圆角卡 |
+| --- | --- | --- |
+| <img src="img/wallpaper-fullscreen.jpg" width="248"> | <img src="img/wallpaper-card.jpg" width="248"> | <img src="img/wallpaper-poster-1.jpg" width="248"> |
 
 满版圆角卡换一天的样子（VOL.5144 · 2026.11.06）：
 
 <img src="img/wallpaper-poster-2.jpg" width="248">
 
-> 表格里「全屏」「白底圆角卡」两张是 Kindle 真机渲染的截图；「满版圆角卡」这两张按插件同一套版式公式在本地生成，几何与字号一致，只是没有真机的 16 级抖动颗粒。
+> 「全屏」「白底圆角卡」是 Kindle 真机渲染的截图；「满版圆角卡」两张按插件同一套版式公式在本地生成，几何与字号一致，只是没有真机的 16 级抖动颗粒。
+
+<!-- strip-for-release:end -->
 
 三种样式都可切换**高对比白**（默认）和**经典灰**配色。浅灰底在 16 级灰墨水屏上容易糊成一片，所以默认用高对比。配色是样式的子选项，不算一种样式。
 

@@ -37,6 +37,13 @@ plugin_dir="$stage_dir/onepage.koplugin"
 mkdir -p "$plugin_dir"
 cp _meta.lua main.lua onepage_api.lua onepage_layout.lua \
     onepage_wallpaper.lua onepage_update.lua README.md "$plugin_dir/"
+# The README's image gallery points at img/, which never ships in the zip. The
+# gallery block is fenced with strip-for-release markers; drop the whole range
+# so the packaged README has no dangling references. sed without -i keeps this
+# portable across BSD and GNU.
+sed '/<!-- strip-for-release:begin/,/<!-- strip-for-release:end -->/d' \
+    "$plugin_dir/README.md" > "$plugin_dir/README.md.stripped"
+mv "$plugin_dir/README.md.stripped" "$plugin_dir/README.md"
 cp -R docs "$plugin_dir/"
 
 rm -f "$archive_path"
