@@ -17,6 +17,16 @@ archive_path="${1:-dist/onepage.koplugin-v${version}.zip}"
 if [[ "$archive_path" != /* ]]; then
     archive_path="$repo_dir/$archive_path"
 fi
+# A zip of a version that was already published must never be silently
+# replaced: the release asset is immutable, and a rebuilt file with the same
+# name but a different digest reads as "安装包校验失败" only after someone has
+# waited for the download. --force is for rebuilding before the first upload.
+if [[ -e "$archive_path" && "${2:-}" != "--force" ]]; then
+    echo "error: $archive_path already exists" >&2
+    echo "       if v$version is published, bump the version instead of rebuilding it" >&2
+    echo "       rebuilding before upload: sh $0 $1 --force" >&2
+    exit 1
+fi
 mkdir -p "$(dirname "$archive_path")"
 
 stage_dir="$(mktemp -d)"
